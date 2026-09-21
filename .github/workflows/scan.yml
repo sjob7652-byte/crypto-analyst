@@ -1,11 +1,19 @@
 name: Memecoin Scanner
 
-# يعمل تلقائياً كل 5 دقائق + زر تشغيل يدوي للتجربة
+# التشغيل الأساسي: repository_dispatch من cron-job.org (دقة بالثانية — بلا تأخر cron)
+# الاحتياطي: schedule كل 15 دقيقة (يلا تعطلت الخدمة الخارجية) + زر يدوي
 # (المستودع عام = دقائق Actions غير محدودة مجاناً)
 on:
+  repository_dispatch:
+    types: [scan]
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "*/15 * * * *"
   workflow_dispatch:
+
+# جولة واحدة في المرة: يلا تداخلت جولتان، الثانية تنتظر (حماية لحالة Gist)
+concurrency:
+  group: memecoin-scan
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -38,6 +46,8 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+          GIST_ID: ${{ secrets.GIST_ID }}
 
       - name: حفظ الحالة في الـcache للجولة القادمة
         uses: actions/cache/save@v4
