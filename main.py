@@ -18,7 +18,7 @@ from config import (
     WAITLIST_ADD_PER_RUN, POS_REEVAL_MIN_SCORE, POS_REEVAL_MIN_AGE_H,
     VOL_SPIKE_MULT, VOL_SPIKE_LOOKBACK, VOL_SPIKE_COOLDOWN_H,
     PAPER_ENABLED, PAPER_START_BALANCE, PAPER_RISK_PER_TRADE,
-    PAPER_MAX_POSITIONS, PAPER_SELL_FRACTIONS, PAPER_SLIPPAGE,
+    PAPER_SELL_FRACTIONS, PAPER_SLIPPAGE,
 )
 
 
@@ -243,7 +243,10 @@ def check_waitlist(s, dry_run, ctx):
 
 def open_position(s, res, verdict=None):
     m = res["metrics"]
-    if not m.get("price"):
+    # السعر من المقاييس، وإلا من سعر الدخول المعلن في التنبيه — حتى لا تُرسل
+    # إشارة Telegram دون أن تُفتح لها صفقة متابعة/وهمية
+    price = m.get("price") or (verdict or {}).get("entry")
+    if not price:
         return
     s["positions"][res["id"]] = {
         "kind": res["kind"],
@@ -251,7 +254,7 @@ def open_position(s, res, verdict=None):
         "chain": res.get("chain"),
         "pair": res.get("pair"),
         "symbol": res.get("symbol"),
-        "entry": m["price"],
+        "entry": price,
         "entry_time": time.time(),
         "tp_hit": [False] * len(TAKE_PROFITS),
         "ref_liq": m.get("liq") or 0,
@@ -260,23 +263,23 @@ def open_position(s, res, verdict=None):
         "band": (verdict or {}).get("band") or expert.band_of(res.get("score")),
         "best_hit": None,
     }
-    paper_buy(s, res)
+    paper_buy(s, res, verdict)
 
 
-def paper_buy(s, res):
+def paper_buy(s, res, verdict=None):
     """شراء وهمي: يخصم من الرصيد الافتراضي ويفتح صفقة وهمية (بلا مخاطرة)."""
     if not PAPER_ENABLED:
         return
     p = s["paper"]
     m = res["metrics"]
-    price = m.get("price")
+    price = m.get("price") or (verdict.get("entry") if verdict else None)
     if not price:
         return
     pid = res["id"]
     if pid in p["positions"]:
         return
-    if len(p["positions"]) >= PAPER_MAX_POSITIONS:
-        return
+    # لا حد أقصى لعدد الصفقات: كل تنبيه Telegram يجب أن يكون له أثر في
+    # المحفظة الوهمية — الرصيد النقدي هو المحدد الطبيعي الوحيد
     amount = min(PAPER_RISK_PER_TRADE, p["cash"])
     if amount < 5:
         return

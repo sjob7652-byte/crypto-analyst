@@ -2,11 +2,25 @@
 """إرسال التنبيهات إلى Telegram — بلغة بسيطة وسهلة الفهم."""
 import html
 import os
+import re
 import requests
 from config import REQUEST_TIMEOUT, TAKE_PROFITS, STOP_LOSS
 
 DISCLAIMER = ("⚠️ عملات الميم خطيرة جداً — خاطر بمبلغ صغير فقط "
               "تتحمّل خسارته كاملة. هذه ليست نصيحة مالية.")
+
+DASHBOARD_BASE = "https://sjob7652-byte.github.io/crypto-analyst/dashboard/"
+
+
+def _slug(pid):
+    return re.sub(r"[^a-zA-Z0-9]+", "-", str(pid or "")).strip("-")
+
+
+def wallet_link(res):
+    """رابط المحفظة الوهمية — يفتح اللوحة مباشرة على صفقة هذه الإشارة."""
+    gist = os.environ.get("GIST_ID", "")
+    q = f"?gist={gist}" if gist else ""
+    return f"{DASHBOARD_BASE}{q}#trade-{_slug(res.get('id'))}"
 
 
 def send(text, dry_run=False):
@@ -82,6 +96,7 @@ def new_signal_msg(res, verdict):
     lines += [
         "",
         f"🔗 <a href=\"{res['pair_url']}\">الرسم البياني</a>",
+        f"💼 <a href=\"{wallet_link(res)}\">تابع هذه الصفقة في المحفظة الوهمية</a>",
         "",
         DISCLAIMER,
     ]
