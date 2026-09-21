@@ -214,6 +214,44 @@
       "score": 63,
       "band": "60-74",
       "best_hit": null
+    },
+    "dex:solana:5DcwsSAVcWdzAmE5EVNsZcWHLMssBymoCmw5KUM9ciuw": {
+      "kind": "dex",
+      "name": "🔺/AVAX",
+      "chain": "solana",
+      "pair": "5DcwsSAVcWdzAmE5EVNsZcWHLMssBymoCmw5KUM9ciuw",
+      "symbol": null,
+      "entry": 0.0003079,
+      "entry_time": 1790001911.3196008,
+      "tp_hit": [
+        false,
+        false,
+        false
+      ],
+      "ref_liq": 53422.22,
+      "warned": false,
+      "score": 63,
+      "band": "60-74",
+      "best_hit": null
+    },
+    "dex:solana:3TyDhMqhQdroh9zBo7CpnZ31GbY96jptiPfgX6ktRozH": {
+      "kind": "dex",
+      "name": "BINKY/WBTC",
+      "chain": "solana",
+      "pair": "3TyDhMqhQdroh9zBo7CpnZ31GbY96jptiPfgX6ktRozH",
+      "symbol": null,
+      "entry": 6.614e-05,
+      "entry_time": 1790001911.6521053,
+      "tp_hit": [
+        false,
+        false,
+        false
+      ],
+      "ref_liq": 24116.36,
+      "warned": false,
+      "score": 63,
+      "band": "60-74",
+      "best_hit": null
     }
   },
   "alerted": {
@@ -232,11 +270,13 @@
     "sig:dex:solana:Dsn59vuP2qrUCZD2tPoU8Pcf5PvUYHsvuvCxT1sEaRSo": 1790000958.3537853,
     "sig:dex:solana:6YpUxTGXuNfqmkbJugPw14yT7oNahTv5udhGpXB4MguW": 1790000958.8365858,
     "sig:dex:solana:7kfbyvJYeUFUxdWZ8RswUtygk4bAvWRJnUjdbNahKM24": 1790000959.3198109,
-    "sig:dex:solana:8fbAaFcbUDBzJh9qEr9Qubgxgk2jnqsB5a6JkuzyyARm": 1790000959.8170402
+    "sig:dex:solana:8fbAaFcbUDBzJh9qEr9Qubgxgk2jnqsB5a6JkuzyyARm": 1790000959.8170402,
+    "sig:dex:solana:5DcwsSAVcWdzAmE5EVNsZcWHLMssBymoCmw5KUM9ciuw": 1790001911.3195958,
+    "sig:dex:solana:3TyDhMqhQdroh9zBo7CpnZ31GbY96jptiPfgX6ktRozH": 1790001911.6520991
   },
   "stats": {
     "day": "2026-09-21",
-    "signals_today": 14
+    "signals_today": 16
   },
   "history": [
     {
@@ -246,5 +286,47 @@
       "outcome": "sl",
       "time": 1790001426.905483
     }
-  ]
+  ],
+  "waitlist": {
+    "dex:solana:HQPi7XFLvDo5tJueiKHygmz43mZSVZ9ZCHwXbfWRyV2j": {
+      "chain": "solana",
+      "pair": "HQPi7XFLvDo5tJueiKHygmz43mZSVZ9ZCHwXbfWRyV2j",
+      "display": "PUMPCAT/SOL",
+      "score": 53,
+      "added": 1790001911.652117,
+      "checks": 1
+    },
+    "dex:solana:Cm8WBjy7dYHkXarBqnAdAGbv97aopUZsZTvuSEbHeP5q": {
+      "chain": "solana",
+      "pair": "Cm8WBjy7dYHkXarBqnAdAGbv97aopUZsZTvuSEbHeP5q",
+      "display": "그록/SOL",
+      "score": 56,
+      "added": 1790001911.6521282,
+      "checks": 1
+    },
+    "dex:solana:5jYdJBnSrtFTmE6C2nVHmPxKjgSdGTAWw4LodTHUbE74": {
+      "chain": "solana",
+      "pair": "5jYdJBnSrtFTmE6C2nVHmPxKjgSdGTAWw4LodTHUbE74",
+      "display": "fomopay/SOL",
+      "score": 48,
+      "added": 1790001911.6521325,
+      "checks": 1
+    },
+    "dex:solana:8WormohZAE1UHyEX65Y5njDzwgEiCPXskr5QhJRdk68d": {
+      "chain": "solana",
+      "pair": "8WormohZAE1UHyEX65Y5njDzwgEiCPXskr5QhJRdk68d",
+      "display": "ZEBRA/SOL",
+      "score": 48,
+      "added": 1790001911.6521358,
+      "checks": 1
+    },
+    "dex:solana:FNpVzcdY4dQwJGiAoVHdWSGPAkwqpot4hxSHCMr6CEes": {
+      "chain": "solana",
+      "pair": "FNpVzcdY4dQwJGiAoVHdWSGPAkwqpot4hxSHCMr6CEes",
+      "display": "SOLTES/SOL",
+      "score": 50,
+      "added": 1790001911.6521385,
+      "checks": 1
+    }
+  }
 }
