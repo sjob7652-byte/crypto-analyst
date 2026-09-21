@@ -229,9 +229,11 @@ def scan_new_coins(s, dry_run, ctx):
             verdict = make_verdict(res, ctx)
             print(f"  -> إشارة {res['signal']}: {res['display']} "
                   f"({res['score']}) نجاح~{verdict['prob']}%")
+            # التنبيه لا يُرسل إلا بعد فتح الصفقة (متابعة + وهمية) بنجاح
+            if not open_position(s, res, verdict):
+                continue
             alerts.send(alerts.new_signal_msg(res, verdict), dry_run)
             s["alerted"][key] = time.time()
-            open_position(s, res, verdict)
             sent += 1
             s["stats"]["signals_today"] = s["stats"].get("signals_today", 0) + 1
         elif res["signal"] == "AVOID" and any("⛔" in w for w in res["warnings"]) \
@@ -296,11 +298,14 @@ def check_waitlist(s, dry_run, ctx):
             verdict = make_verdict(res, ctx)
             print(f"  -> 🔄 تحسّنت: {res['display']} ({res['score']}) "
                   f"نجاح~{verdict['prob']}%")
+            # التنبيه لا يُرسل إلا بعد فتح الصفقة (متابعة + وهمية) بنجاح
+            if not open_position(s, res, verdict):
+                wl.pop(wid, None)
+                continue
             msg = ("🔄 <b>رجعت بقوة!</b> كانت تحت المراقبة والآن تحسّنت "
                    "مؤشراتها.\n\n" + alerts.new_signal_msg(res, verdict))
             alerts.send(msg, dry_run)
             s["alerted"][f"sig:{wid}"] = now
-            open_position(s, res, verdict)
             s["stats"]["signals_today"] = s["stats"].get("signals_today", 0) + 1
             wl.pop(wid, None)
         elif res["signal"] == "AVOID":
@@ -311,12 +316,18 @@ def check_waitlist(s, dry_run, ctx):
 
 
 def open_position(s, res, verdict=None):
+    """يفتح صفقة متابعة + صفقة وهمية — يرجع True فقط إذا نجح الاثنان.
+    الترتيب مقصود: لا تُفتح صفقة متابعة دون صفقة وهمية مطابقة، ولا يُرسل
+    تنبيه Telegram إلا بعد نجاح الفتح (ضمان ذري)."""
     m = res["metrics"]
-    # السعر من المقاييس، وإلا من سعر الدخول المعلن في التنبيه — حتى لا تُرسل
-    # إشارة Telegram دون أن تُفتح لها صفقة متابعة/وهمية
+    # السعر من المقاييس، وإلا من سعر الدخول المعلن في التنبيه
     price = m.get("price") or (verdict or {}).get("entry")
     if not price:
-        return
+        return False
+    if not paper_buy(s, res, verdict):
+        print(f"  -> تعذر فتح الصفقة الوهمية لـ {res['display']} "
+              f"(رصيد غير كافٍ) — لن يُرسل تنبيه")
+        return False
     s["positions"][res["id"]] = {
         "kind": res["kind"],
         "name": res["display"],
@@ -333,26 +344,27 @@ def open_position(s, res, verdict=None):
         "band": (verdict or {}).get("band") or expert.band_of(res.get("score")),
         "best_hit": None,
     }
-    paper_buy(s, res, verdict)
+    return True
 
 
 def paper_buy(s, res, verdict=None):
-    """شراء وهمي: يخصم من الرصيد الافتراضي ويفتح صفقة وهمية (بلا مخاطرة)."""
+    """شراء وهمي: يخصم من الرصيد الافتراضي ويفتح صفقة وهمية (بلا مخاطرة).
+    يرجع True عند نجاح الشراء، False عند تعذره (بلا رصيد/بلا سعر/موجودة)."""
     if not PAPER_ENABLED:
-        return
+        return True
     p = s["paper"]
     m = res["metrics"]
     price = m.get("price") or (verdict.get("entry") if verdict else None)
     if not price:
-        return
+        return False
     pid = res["id"]
     if pid in p["positions"]:
-        return
+        return True  # الصفقة الوهمية موجودة أصلاً — الضمان محقق
     # لا حد أقصى لعدد الصفقات: كل تنبيه Telegram يجب أن يكون له أثر في
     # المحفظة الوهمية — الرصيد النقدي هو المحدد الطبيعي الوحيد
     amount = min(PAPER_RISK_PER_TRADE, p["cash"])
     if amount < 5:
-        return
+        return False
     p["cash"] -= amount
     # سعر التنفيذ الواقعي: الشراء بسعر أغلى بسبب الانزلاق السعري
     eff_entry = price * (1 + PAPER_SLIPPAGE)
@@ -373,6 +385,7 @@ def paper_buy(s, res, verdict=None):
     p["trades"] += 1
     print(f"  -> محفظة وهمية: شراء {res['display']} بـ ${amount:.2f} "
           f"(تنفيذ: {eff_entry:.6g} بعد الانزلاق)")
+    return True
 
 
 def update_paper(s, dry_run):
@@ -601,9 +614,11 @@ def scan_watchlist(s, dry_run, ctx):
             verdict = make_verdict(res, ctx)
             print(f"  -> إشارة {res['signal']}: {res['display']} "
                   f"({res['score']}) نجاح~{verdict['prob']}%")
+            # التنبيه لا يُرسل إلا بعد فتح الصفقة (متابعة + وهمية) بنجاح
+            if not open_position(s, res, verdict):
+                continue
             alerts.send(alerts.new_signal_msg(res, verdict), dry_run)
             s["alerted"][key] = time.time()
-            open_position(s, res, verdict)
             s["stats"]["signals_today"] = s["stats"].get("signals_today", 0) + 1
     movers.sort(key=lambda x: abs(x[1]), reverse=True)
     return movers
