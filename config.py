@@ -36,7 +36,26 @@ DEXSCREENER_API = "https://api.dexscreener.com"
 HONEYPOT_API = "https://api.honeypot.is/v2"
 RUGCHECK_API = "https://api.rugcheck.xyz"
 BINANCE_API = "https://data-api.binance.vision"  # بيانات عمومية بدون مفتاح
-NEWS_RSS = "https://cointelegraph.com/rss"
+NEWS_RSS = "https://cointelegraph.com/rss"  # (قديم — يُستخدم NEWS_FEEDS الآن)
+
+# ---------- مصادر إضافية: عملات + أخبار ----------
+USE_COINGECKO = True
+COINGECKO_API = "https://api.coingecko.com/api/v3"  # مجاني بدون مفتاح
+
+USE_NEWS = True
+NEWS_FEEDS = [
+    ("CoinDesk", "https://www.coindesk.com/arc/outboundfeeds/rss/"),
+    ("CoinTelegraph", "https://cointelegraph.com/rss"),
+    ("Decrypt", "https://decrypt.co/feed"),
+    ("The Block", "https://www.theblock.co/rss.xml"),
+    ("Bitcoin Magazine", "https://bitcoinmagazine.com/.rss/full/"),
+    ("CoinJournal", "https://coinjournal.net/rss/"),
+]
+NEWS_LOOKBACK_HOURS = 12   # أخبار آخر 12 ساعة فقط
+NEWS_MAX_ITEMS = 40
+
+# ---------- الخبير: ذاكرة تتعلم من النتائج ----------
+MIN_SAMPLES_FOR_LEARNING = 5  # أقل عدد نتائج سابقة ليعتمد عليها التعلم
 
 # معرّف الشبكة لدى honeypot.is
 HONEYPOT_CHAIN_IDS = {

@@ -1,19 +1,12 @@
 # -*- coding: utf-8 -*-
-"""إرسال التنبيهات إلى Telegram + تنسيق الرسائل بالعربية."""
+"""إرسال التنبيهات إلى Telegram — بلغة بسيطة وسهلة الفهم."""
 import html
 import os
 import requests
 from config import REQUEST_TIMEOUT, TAKE_PROFITS, STOP_LOSS
 
-SIGNAL_EMOJI = {
-    "STRONG_BUY": "🟢🟢", "BUY": "🟢", "WATCH": "🟡", "AVOID": "🔴",
-}
-SIGNAL_AR = {
-    "STRONG_BUY": "شراء قوي", "BUY": "شراء",
-    "WATCH": "مراقبة فقط", "AVOID": "تجنّب",
-}
-DISCLAIMER = ("<i>⚠️ عملات الميم عالية المخاطر جداً — لا تخاطر إلا بمبلغ صغير "
-              "تتحمّل خسارته كاملة. هذه ليست نصيحة مالية.</i>")
+DISCLAIMER = ("⚠️ عملات الميم خطيرة جداً — خاطر بمبلغ صغير فقط "
+              "تتحمّل خسارته كاملة. هذه ليست نصيحة مالية.")
 
 
 def send(text, dry_run=False):
@@ -64,95 +57,133 @@ def fmt_price(x):
     return f"${x:,.2f}" if x >= 0.01 else f"${x:.8g}"
 
 
-def _bullets(items, limit=6):
-    return "\n".join("• " + html.escape(str(i)) for i in items[:limit])
-
-
-def new_signal_msg(res):
-    m = res["metrics"]
-    e = SIGNAL_EMOJI[res["signal"]]
-    label = SIGNAL_AR[res["signal"]]
+def new_signal_msg(res, verdict):
+    """إشارة شراء بكلام بسيط: سعر الدخول/الخروج + نسبة النجاح + السبب."""
+    name = html.escape(res["display"])
+    v = verdict
     lines = [
-        f"{e} <b>إشارة {label}: {html.escape(res['display'])}</b>",
-        f"النتيجة: <b>{res['score']}/100</b>",
-        f"💰 السعر: {fmt_price(m['price'])}",
+        f"{v['emoji']} <b>{v['word']}: {name}</b>",
+        "",
+        f"💰 <b>ادخل الآن بسعر:</b> {fmt_price(v['entry'])}",
+        f"🎯 <b>بِع عند:</b> {fmt_price(v['tps'][0])} (الهدف الأول +30%)",
+        f"📈 الهدف الثاني: {fmt_price(v['tps'][1])} (+70%)",
+        f"🚀 الهدف الثالث: {fmt_price(v['tps'][2])} (+150%)",
+        f"🛑 <b>وقف الخسارة:</b> {fmt_price(v['sl'])} ← إذا وصل السعر هنا اخرج فوراً",
+        "",
+        f"✅ <b>نسبة النجاح التقديرية:</b> {v['prob']}%",
     ]
-    if m.get("liq"):
-        lines.append(f"💧 السيولة: {fmt_usd(m['liq'])} | 📊 حجم 24س: {fmt_usd(m['vol24'])}")
-        lines.append(f"📈 1س: {m['pc1h']:+.1f}% | 24س: {m['pc24h']:+.1f}%")
-    else:
-        lines.append(f"📊 حجم 24س: {fmt_usd(m['vol24'])} | التغير 24س: {m['pc24h']:+.1f}%")
-    if res["reasons"]:
-        lines.append("\n✅ <b>نقاط القوة:</b>\n" + _bullets(res["reasons"]))
-    if res["warnings"]:
-        lines.append("\n⚠️ <b>انتبه:</b>\n" + _bullets(res["warnings"], 4))
-    if res["signal"] in ("BUY", "STRONG_BUY"):
-        tps = " / ".join(f"+{int(t * 100)}%" for t in TAKE_PROFITS)
-        lines.append(f"\n🎯 <b>أهداف البيع المقترحة:</b> {tps}")
-        lines.append(f"🛑 <b>وقف الخسارة:</b> -{int(STOP_LOSS * 100)}%")
-        lines.append("سأراقب السعر وأنبّهك عند كل هدف أو عند وقف الخسارة.")
-    lines.append(f"\n🔗 <a href=\"{res['pair_url']}\">عرض الرسم البياني</a>")
-    lines.append("\n" + DISCLAIMER)
+    if v.get("learned") is not None:
+        lines.append(f"🧠 <i>بناءً على نتائج {v['band']} السابقة: {v['learned']}% منها رابحة</i>")
+    lines.append(f"💡 <b>لماذا هذه العملة؟</b> {html.escape(v['reason'])}")
+    if v.get("news"):
+        lines.append(f"📰 <b>خبر عنها:</b> {html.escape(v['news'][:110])}")
+    if v.get("warn"):
+        lines.append(f"⚠️ <b>انتبه:</b> {html.escape(v['warn'])}")
+    lines += [
+        "",
+        f"🔗 <a href=\"{res['pair_url']}\">الرسم البياني</a>",
+        "",
+        DISCLAIMER,
+    ]
     return "\n".join(lines)
+
+
+def avoid_msg(res):
+    """تحذير بسيط: لا تدخل."""
+    name = html.escape(res["display"])
+    reason = ""
+    for w in (res.get("warnings") or []):
+        if "⛔" in w:
+            reason = w.replace("⛔", "").strip()
+            break
+    if not reason and res.get("warnings"):
+        reason = str(res["warnings"][0])
+    return (
+        f"🔴 <b>لا تدخل: {name}</b>\n"
+        f"⛔ <b>السبب:</b> {html.escape(reason or 'علامات خطر في العقد أو السيولة')}\n"
+        f"تجاهل هذه العملة وركّز على الفرص القادمة."
+    )
 
 
 def tp_hit_msg(name, entry, price, level_idx):
     pct = int(TAKE_PROFITS[level_idx] * 100)
     gain = (price / entry - 1) * 100
     return (
-        f"🎯 <b>تحقّق الهدف {level_idx + 1} (+{pct}%) — {html.escape(name)}</b>\n"
-        f"السعر الآن: {fmt_price(price)} (ربح فعلي: +{gain:.1f}%)\n"
-        f"💡 اقتراح: بِع جزءاً (30-50%) لتأمين الربح، وارفع وقف الخسارة إلى سعر دخولك.\n"
-        f"سأستمر بمراقبة الأهداف المتبقية."
+        f"🎯 <b>مبروك! وصل الهدف {level_idx + 1} — {html.escape(name)}</b>\n"
+        f"دخلت بسعر: {fmt_price(entry)}\n"
+        f"السعر الآن: {fmt_price(price)} (ربحك: +{gain:.1f}%)\n"
+        f"💡 <b>نصيحة:</b> بِع نصف الكمية لتأمين الربح، واترك النصف للأهداف الباقية."
     )
 
 
 def all_tp_msg(name, entry, price):
     gain = (price / entry - 1) * 100
     return (
-        f"🏆 <b>اكتملت كل الأهداف — {html.escape(name)}</b>\n"
+        f"🏆 <b>اكتملت كل الأهداف — {html.escape(name)}</b> 🎉\n"
         f"من {fmt_price(entry)} إلى {fmt_price(price)} (ربح: +{gain:.1f}%)\n"
-        f"أحسنت! سأتوقف عن متابعة هذه الصفقة. 🎉"
+        f"أحسنت! توقفت عن متابعة هذه الصفقة."
     )
 
 
 def stop_loss_msg(name, entry, price):
     loss = (1 - price / entry) * 100
     return (
-        f"🛑 <b>وقف الخسارة تفعّل — {html.escape(name)}</b>\n"
-        f"السعر كسر -{int(STOP_LOSS * 100)}% من دخولك ({fmt_price(entry)} → {fmt_price(price)}، خسارة {loss:.1f}%)\n"
-        f"💡 اقتراح: اخرج الآن لحماية رأس مالك. الصفقات الخاسرة جزء من اللعبة — المهم الالتزام بالخطة."
+        f"🛑 <b>اخرج الآن — {html.escape(name)}</b>\n"
+        f"السعر نزل تحت وقف الخسارة.\n"
+        f"دخلت بـ: {fmt_price(entry)} → الآن: {fmt_price(price)} (خسارة: -{loss:.1f}%)\n"
+        f"💡 <b>نصيحة:</b> اخرج فوراً لحماية ما تبقى. الالتزام بالخطة أهم من صفقة واحدة."
     )
 
 
 def rug_warn_msg(name, price):
     return (
-        f"🚨 <b>تحذير: {html.escape(name)} — إشارات خطر!</b>\n"
+        f"🚨 <b>خطر! {html.escape(name)}</b>\n"
         f"السعر: {fmt_price(price)}\n"
-        f"السيولة انهارت بشكل حاد أو ظهرت مشكلة في العقد.\n"
-        f"💡 اقتراح: فكّر بالخروج الفوري إن كنت داخلاً."
+        f"السيولة تنهار أو ظهرت مشكلة في العقد.\n"
+        f"💡 <b>نصيحة:</b> اخرج فوراً إذا كنت داخلاً."
     )
 
 
-def digest_msg(date_str, positions, new_signals, movers, news):
-    lines = [f"📰 <b>ملخص الكريبتو — {date_str}</b>"]
+def digest_msg(date_str, positions, new_signals, movers, ctx):
+    lines = [f"📰 <b>ملخص اليوم — {date_str}</b>"]
+
+    macro = (ctx or {}).get("macro")
+    if macro:
+        icon = "📈" if macro["btc_chg"] >= 0 else "📉"
+        lines.append(f"\n{icon} <b>البيتكوين:</b> {fmt_usd(macro['btc'])} ({macro['btc_chg']:+.1f}% في 24س)")
+
     if positions:
-        lines.append("\n📌 <b>صفقات قيد المتابعة:</b>")
+        lines.append("\n📌 <b>صفقاتك المفتوحة:</b>")
         for p in positions:
             pnl = (p["price"] / p["entry"] - 1) * 100
             icon = "🟢" if pnl >= 0 else "🔴"
             lines.append(f"{icon} {html.escape(p['name'])}: {pnl:+.1f}%")
     else:
-        lines.append("\n📌 لا صفقات قيد المتابعة حالياً.")
+        lines.append("\n📌 لا صفقات مفتوحة حالياً.")
     lines.append(f"\n🔔 إشارات جديدة اليوم: <b>{new_signals}</b>")
+
+    track = (ctx or {}).get("track")
+    if track and track["n"]:
+        lines.append(f"🧠 <b>سجل الإشارات:</b> {track['wins']} رابحة من آخر {track['n']}")
+
     if movers:
-        lines.append("\n🔥 <b>أكبر تحركات عملات الميم (Binance):</b>")
+        lines.append("\n🔥 <b>أكبر تحركات عملات الميم:</b>")
         for sym, chg in movers[:3]:
             icon = "📈" if chg >= 0 else "📉"
             lines.append(f"{icon} {sym}: {chg:+.1f}%")
+
+    trending = (ctx or {}).get("trending") or []
+    if trending:
+        names = ", ".join(t["symbol"] for t in trending[:5])
+        lines.append(f"\n👀 <b>رائج الآن:</b> {html.escape(names)}")
+
+    news = (ctx or {}).get("news_top") or []
     if news:
-        lines.append("\n🗞️ <b>عناوين الأخبار:</b>")
-        for title, link in news[:4]:
-            lines.append(f"• <a href=\"{link}\">{html.escape(title[:90])}</a>")
+        lines.append("\n🗞️ <b>أهم الأخبار:</b>")
+        for it in news[:4]:
+            s = it.get("sentiment", 0)
+            icon = "🟢" if s > 0.2 else ("🔴" if s < -0.2 else "⚪")
+            lines.append(f"{icon} <a href=\"{it['link']}\">{html.escape(it['title'][:85])}</a>")
+
     lines.append("\n" + DISCLAIMER)
     return "\n".join(lines)

@@ -8,12 +8,55 @@ from datetime import datetime, timezone
 import clients
 import analyzer
 import alerts
+import expert
 import state as st
 from config import (
     CHAINS, SCAN_LIMIT, MIN_LIQUIDITY_USD, MIN_VOLUME_24H_USD,
     MAX_PAIR_AGE_DAYS, WATCHLIST, TAKE_PROFITS, STOP_LOSS,
-    POSITION_MAX_AGE_DAYS, DIGEST_HOURS_UTC, NEWS_RSS,
+    POSITION_MAX_AGE_DAYS, DIGEST_HOURS_UTC, USE_COINGECKO, USE_NEWS,
 )
+
+
+def build_context(s):
+    """سياق الخبير: الأخبار + العملات الرائجة + نبض السوق + ذاكرة النتائج."""
+    ctx = {"news": [], "trending": [], "macro": None, "nc": None}
+    if USE_NEWS:
+        try:
+            nc = clients.NewsClient()
+            ctx["news"] = nc.fetch()
+            ctx["nc"] = nc
+            print(f"أخبار: {len(ctx['news'])} عنواناً من {len(nc.feeds)} مصادر")
+        except Exception as e:
+            print("news error:", e)
+    if USE_COINGECKO:
+        try:
+            ctx["trending"] = clients.coingecko_trending()
+        except Exception:
+            pass
+        try:
+            ctx["macro"] = clients.coingecko_macro()
+            if ctx["macro"]:
+                print(f"BTC: {ctx['macro']['btc_chg']:+.1f}% (24س)")
+        except Exception:
+            pass
+    ctx["band_stats"] = st.band_stats(s)
+    return ctx
+
+
+def coin_symbol(res):
+    """يستخرج رمز العملة من نتيجة التحليل."""
+    if res.get("symbol"):
+        return res["symbol"].replace("USDT", "")
+    return (res.get("display") or "").split("/")[0]
+
+
+def make_verdict(res, ctx):
+    nc = ctx.get("nc")
+    sym = coin_symbol(res)
+    coin_news = nc.for_coin(sym) if nc else []
+    macro = ctx.get("macro") or {}
+    return expert.decide(res, coin_news, macro.get("btc_chg"),
+                         ctx.get("band_stats"))
 
 
 def pick_best_pair(pairs):
@@ -31,7 +74,7 @@ def pick_best_pair(pairs):
     return [p for p, _ in best.values()]
 
 
-def scan_new_coins(s, dry_run):
+def scan_new_coins(s, dry_run, ctx):
     print("=== فحص العملات الجديدة ===")
     tokens = clients.latest_profiles() + clients.latest_boosts()
     seen, uniq = set(), []
@@ -78,22 +121,24 @@ def scan_new_coins(s, dry_run):
         if time.time() - s["alerted"].get(key, 0) < 24 * 3600:
             continue
         if res["signal"] in ("BUY", "STRONG_BUY") and sent < 5:
-            print(f"  -> إشارة {res['signal']}: {res['display']} ({res['score']})")
-            alerts.send(alerts.new_signal_msg(res), dry_run)
+            verdict = make_verdict(res, ctx)
+            print(f"  -> إشارة {res['signal']}: {res['display']} "
+                  f"({res['score']}) نجاح~{verdict['prob']}%")
+            alerts.send(alerts.new_signal_msg(res, verdict), dry_run)
             s["alerted"][key] = time.time()
-            open_position(s, res)
+            open_position(s, res, verdict)
             sent += 1
             s["stats"]["signals_today"] = s["stats"].get("signals_today", 0) + 1
         elif res["signal"] == "AVOID" and any("⛔" in w for w in res["warnings"]) \
                 and sent < 6:
             print(f"  -> تحذير نصب: {res['display']}")
-            alerts.send(alerts.new_signal_msg(res), dry_run)
+            alerts.send(alerts.avoid_msg(res), dry_run)
             s["alerted"][key] = time.time()
             sent += 1
     return results
 
 
-def open_position(s, res):
+def open_position(s, res, verdict=None):
     m = res["metrics"]
     if not m.get("price"):
         return
@@ -108,6 +153,9 @@ def open_position(s, res):
         "tp_hit": [False] * len(TAKE_PROFITS),
         "ref_liq": m.get("liq") or 0,
         "warned": False,
+        "score": res.get("score"),
+        "band": (verdict or {}).get("band") or expert.band_of(res.get("score")),
+        "best_hit": None,
     }
 
 
@@ -139,9 +187,11 @@ def update_positions(s, dry_run):
         for i, tp in enumerate(TAKE_PROFITS):
             if not pos["tp_hit"][i] and price >= entry * (1 + tp):
                 pos["tp_hit"][i] = True
+                pos["best_hit"] = f"tp{i + 1}"
                 if all(pos["tp_hit"]):
                     print(f"  -> اكتملت الأهداف: {pos['name']}")
                     alerts.send(alerts.all_tp_msg(pos["name"], entry, price), dry_run)
+                    st.record_outcome(s, pos, "tp3")
                     closed.append(pid)
                 else:
                     print(f"  -> تحقق الهدف {i + 1}: {pos['name']}")
@@ -153,6 +203,7 @@ def update_positions(s, dry_run):
         if price <= entry * (1 - STOP_LOSS):
             print(f"  -> وقف الخسارة: {pos['name']}")
             alerts.send(alerts.stop_loss_msg(pos["name"], entry, price), dry_run)
+            st.record_outcome(s, pos, "sl")
             closed.append(pid)
             continue
         # تحذير انهيار السيولة
@@ -163,13 +214,14 @@ def update_positions(s, dry_run):
             alerts.send(alerts.rug_warn_msg(pos["name"], price), dry_run)
         # انتهاء مدة المتابعة
         if time.time() - pos["entry_time"] > POSITION_MAX_AGE_DAYS * 86400:
+            st.record_outcome(s, pos, pos.get("best_hit") or "expired")
             closed.append(pid)
     for pid in closed:
         s["positions"].pop(pid, None)
     print(f"صفقات مفتوحة: {len(s['positions'])}")
 
 
-def scan_watchlist(s, dry_run):
+def scan_watchlist(s, dry_run, ctx):
     print("=== فحص عملات Binance ===")
     movers = []
     for sym in WATCHLIST:
@@ -189,26 +241,18 @@ def scan_watchlist(s, dry_run):
             res["id"] = f"binance:{sym}"
             res["kind"] = "binance"
             res["symbol"] = sym
-            print(f"  -> إشارة {res['signal']}: {res['display']} ({res['score']})")
-            alerts.send(alerts.new_signal_msg(res), dry_run)
+            verdict = make_verdict(res, ctx)
+            print(f"  -> إشارة {res['signal']}: {res['display']} "
+                  f"({res['score']}) نجاح~{verdict['prob']}%")
+            alerts.send(alerts.new_signal_msg(res, verdict), dry_run)
             s["alerted"][key] = time.time()
-            open_position(s, res)
+            open_position(s, res, verdict)
             s["stats"]["signals_today"] = s["stats"].get("signals_today", 0) + 1
     movers.sort(key=lambda x: abs(x[1]), reverse=True)
     return movers
 
 
-def get_news():
-    try:
-        import feedparser
-        feed = feedparser.parse(NEWS_RSS)
-        return [(e.title, e.link) for e in feed.entries[:4]
-                if getattr(e, "title", None)]
-    except Exception:
-        return []
-
-
-def maybe_digest(s, dry_run, movers):
+def maybe_digest(s, dry_run, movers, ctx):
     now = datetime.now(timezone.utc)
     if now.hour not in DIGEST_HOURS_UTC:
         return
@@ -221,12 +265,21 @@ def maybe_digest(s, dry_run, movers):
         if price:
             positions.append({"name": pos["name"], "entry": pos["entry"],
                               "price": price})
-    news = get_news()
+    nc = ctx.get("nc")
+    news_top = sorted(ctx.get("news", []),
+                      key=lambda x: abs(x.get("sentiment", 0)),
+                      reverse=True)[:6]
+    dctx = {
+        "macro": ctx.get("macro"),
+        "trending": ctx.get("trending"),
+        "news_top": news_top,
+        "track": st.track_summary(s),
+    }
     date_str = now.strftime("%Y-%m-%d")
     print("=== إرسال الملخص اليومي ===")
     alerts.send(alerts.digest_msg(date_str, positions,
                                   s["stats"].get("signals_today", 0),
-                                  movers, news), dry_run)
+                                  movers, dctx), dry_run)
 
 
 def main():
@@ -240,10 +293,11 @@ def main():
     if s["stats"].get("day") != today:
         s["stats"] = {"day": today, "signals_today": 0}
 
-    scan_new_coins(s, a.dry_run)
+    ctx = build_context(s)
+    scan_new_coins(s, a.dry_run, ctx)
     update_positions(s, a.dry_run)
-    movers = scan_watchlist(s, a.dry_run)
-    maybe_digest(s, a.dry_run, movers)
+    movers = scan_watchlist(s, a.dry_run, ctx)
+    maybe_digest(s, a.dry_run, movers, ctx)
 
     if not a.dry_run:
         st.save(s)
