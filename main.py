@@ -14,7 +14,8 @@ from config import (
     CHAINS, SCAN_LIMIT, MIN_LIQUIDITY_USD, MIN_VOLUME_24H_USD,
     MIN_TXNS_24H, MAX_PAIR_AGE_DAYS, WATCHLIST, TAKE_PROFITS, STOP_LOSS,
     POSITION_MAX_AGE_DAYS, DIGEST_HOURS_UTC, USE_COINGECKO, USE_NEWS,
-    USE_FNG,
+    USE_FNG, NEW_ALERT_MAX_AGE_H, WAITLIST_MAX_AGE_H, WAITLIST_MAX_SIZE,
+    WAITLIST_ADD_PER_RUN,
 )
 
 
@@ -93,13 +94,16 @@ def pick_best_pair(pairs):
 
 def scan_new_coins(s, dry_run, ctx):
     print("=== فحص العملات الجديدة ===")
-    tokens = clients.latest_profiles() + clients.latest_boosts()
+    profiles = clients.latest_profiles()
+    boosts = clients.latest_boosts()
+    boosted_set = {(c, a.lower()) for c, a in boosts}
+    tokens = profiles + boosts
     seen, uniq = set(), []
     for t in tokens:
         if t not in seen:
             seen.add(t)
             uniq.append(t)
-    print(f"عناوين مرشحة: {len(uniq)}")
+    print(f"عناوين مرشحة: {len(uniq)} (منها {len(boosted_set)} بترويج مدفوع)")
 
     pairs = clients.pairs_for_tokens(uniq[:90])
     now_ms = time.time() * 1000
@@ -110,12 +114,18 @@ def scan_new_coins(s, dry_run, ctx):
         tx = (p.get("txns") or {}).get("h24") or {}
         ntx = float(tx.get("buys") or 0) + float(tx.get("sells") or 0)
         created = p.get("pairCreatedAt") or 0
-        age_d = (now_ms - created) / 86400000 if created else 99999
+        age_d = (now_ms - created) / 86400000 if created else 0
         if liq < MIN_LIQUIDITY_USD or vol < MIN_VOLUME_24H_USD:
             continue
         if ntx < MIN_TXNS_24H:   # تنقية: عملات بلا نشاط حقيقي = ضجيج
             continue
-        if age_d > MAX_PAIR_AGE_DAYS:
+        if created and age_d * 24 > NEW_ALERT_MAX_AGE_H:
+            continue  # الفرص الحقيقية في الساعات الأولى فقط
+        # فلتر الرمز المشبوه (حروف خفية / تقليد عملات مشهورة)
+        sym = ((p.get("baseToken") or {}).get("symbol") or "")
+        ok, why = analyzer.check_symbol(sym)
+        if not ok:
+            print(f"  x رمز مرفوض {sym[:20]!r}: {why}")
             continue
         cands.append(p)
     cands.sort(key=lambda p: float((p.get("liquidity") or {}).get("usd") or 0),
@@ -127,8 +137,9 @@ def scan_new_coins(s, dry_run, ctx):
     for p in cands:
         chain = p.get("chainId")
         addr = (p.get("baseToken") or {}).get("address")
+        boosted = (chain, (addr or "").lower()) in boosted_set
         sec = clients.token_security(chain, addr) if addr else None
-        res = analyzer.analyze_pair(p, sec)
+        res = analyzer.analyze_pair(p, sec, boosted=boosted)
         res["id"] = f"dex:{chain}:{p.get('pairAddress')}"
         res["kind"] = "dex"
         res["chain"] = chain
@@ -137,6 +148,7 @@ def scan_new_coins(s, dry_run, ctx):
 
     results.sort(key=lambda r: r["score"], reverse=True)
     sent = 0
+    wait_added = 0
     for res in results:
         key = f"sig:{res['id']}"
         if time.time() - s["alerted"].get(key, 0) < 24 * 3600:
@@ -156,7 +168,65 @@ def scan_new_coins(s, dry_run, ctx):
             alerts.send(alerts.avoid_msg(res), dry_run)
             s["alerted"][key] = time.time()
             sent += 1
+        elif res["signal"] == "WATCH" and wait_added < WAITLIST_ADD_PER_RUN:
+            # لائحة الانتظار: "شبه جاهزة" — تُعاد فحصها كل جولة لمدة 6 ساعات
+            wl = s.setdefault("waitlist", {})
+            if res["id"] not in wl and len(wl) < WAITLIST_MAX_SIZE:
+                wl[res["id"]] = {
+                    "chain": res["chain"], "pair": res["pair"],
+                    "display": res["display"], "score": res["score"],
+                    "added": time.time(), "checks": 0,
+                }
+                wait_added += 1
+                print(f"  -> لائحة الانتظار: {res['display']} ({res['score']})")
     return results
+
+
+def check_waitlist(s, dry_run, ctx):
+    """إعادة فحص عملات لائحة الانتظار — من تحسّن يُرسل كتنبيه."""
+    wl = s.setdefault("waitlist", {})
+    if not wl:
+        return
+    print(f"=== إعادة فحص لائحة الانتظار ({len(wl)}) ===")
+    now = time.time()
+    for wid in list(wl)[:15]:  # حد أقصى 15 إعادة فحص في الجولة
+        e = wl[wid]
+        if now - e["added"] > WAITLIST_MAX_AGE_H * 3600:
+            wl.pop(wid, None)
+            continue
+        p = clients.get_pair(e["chain"], e["pair"])
+        if not p:
+            e["checks"] += 1
+            if e["checks"] >= 3:
+                wl.pop(wid, None)
+            continue
+        created = p.get("pairCreatedAt") or 0
+        if created and (now * 1000 - created) / 3_600_000 > NEW_ALERT_MAX_AGE_H:
+            wl.pop(wid, None)  # تجاوزت نافذة الفرص المبكرة
+            continue
+        sec = clients.token_security(e["chain"],
+                                      (p.get("baseToken") or {}).get("address"))
+        res = analyzer.analyze_pair(p, sec)
+        res["id"] = wid
+        res["kind"] = "dex"
+        res["chain"] = e["chain"]
+        res["pair"] = e["pair"]
+        if res["signal"] in ("BUY", "STRONG_BUY"):
+            verdict = make_verdict(res, ctx)
+            print(f"  -> 🔄 تحسّنت: {res['display']} ({res['score']}) "
+                  f"نجاح~{verdict['prob']}%")
+            msg = ("🔄 <b>رجعت بقوة!</b> كانت تحت المراقبة والآن تحسّنت "
+                   "مؤشراتها.\n\n" + alerts.new_signal_msg(res, verdict))
+            alerts.send(msg, dry_run)
+            s["alerted"][f"sig:{wid}"] = now
+            open_position(s, res, verdict)
+            s["stats"]["signals_today"] = s["stats"].get("signals_today", 0) + 1
+            wl.pop(wid, None)
+        elif res["signal"] == "AVOID":
+            wl.pop(wid, None)  # ساءت — أخرجها من اللائحة
+        else:
+            e["checks"] += 1
+            e["score"] = res["score"]
 
 
 def open_position(s, res, verdict=None):
@@ -318,6 +388,7 @@ def main():
 
     ctx = build_context(s)
     scan_new_coins(s, a.dry_run, ctx)
+    check_waitlist(s, a.dry_run, ctx)
     update_positions(s, a.dry_run)
     movers = scan_watchlist(s, a.dry_run, ctx)
     maybe_digest(s, a.dry_run, movers, ctx)

@@ -7,7 +7,8 @@
    نسبة النجاح حسب ما حصل فعلاً في الماضي (hit rate).
 3. يأخذ الأخبار ونبض السوق العام بعين الاعتبار.
 """
-from config import TAKE_PROFITS, STOP_LOSS, MIN_SAMPLES_FOR_LEARNING
+from config import (TAKE_PROFITS, STOP_LOSS, MIN_SAMPLES_FOR_LEARNING,
+                    WASH_RATIO_LIMIT, BUY_PRESSURE_STRONG, BUY_PRESSURE_WEAK)
 
 
 def band_of(score):
@@ -63,8 +64,17 @@ def simple_reasons(res, coin_news, fng=None):
     pc1h = m.get("pc1h")
     pc24 = m.get("pc24h")
 
-    if liq and vol and liq > 0 and vol / liq >= 3:
+    if liq and vol and liq > 0 and vol / liq >= 3 \
+            and vol / liq <= WASH_RATIO_LIMIT:
         out.append("تداول قوي عليها الآن (ناس كثيرة تشتري وتبيع)")
+    if liq and vol and liq > 0 and vol / liq > WASH_RATIO_LIMIT:
+        out.append("حجمها مشبوه مقارنة بسيولتها — كن حذراً")
+    # ضغط الشراء مقابل البيع
+    buys, sells = m.get("buys") or 0, m.get("sells") or 0
+    if buys + sells > 0:
+        bp = buys / (buys + sells)
+        if bp >= BUY_PRESSURE_STRONG:
+            out.append("المشترون أكثر بكثير من البائعين — طلب حقيقي عليها")
     if pc1h is not None and pc1h >= 10:
         out.append("السعر يصعد بسرعة في آخر ساعة")
     elif pc1h is not None and pc1h >= 3:
@@ -87,6 +97,9 @@ def simple_reasons(res, coin_news, fng=None):
         pos = [n for n in coin_news if n.get("sentiment", 0) > 0.2]
         if pos:
             out.append("أخبار إيجابية عنها اليوم من مصادر موثوقة")
+
+    if res.get("boosted"):
+        out.append("فريقها يروّج لها الآن — اهتمام متزايد حولها")
 
     # مؤشر الخوف والطمع: تحذير بسيط عند التطرف
     fng_v = None
@@ -134,8 +147,7 @@ def decide(res, coin_news, btc_chg, band_stats, fng=None, macro_verified=True):
     if macro_verified and btc_chg is not None and btc_chg <= -5:
         prob -= 8
 
-    # 2ب) مؤشر الخوف والطمع: التطرف في أي اتجاه = مخاطرة أعلى
-    fng_v = None
+    # 2ب) مؤشر الخوف والطمع: التطرف في أي اتجاه = مخاطرة أعلى    fng_v = None
     if isinstance(fng, dict):
         fng_v = fng.get("value")
     elif isinstance(fng, (int, float)):
@@ -149,6 +161,24 @@ def decide(res, coin_news, btc_chg, band_stats, fng=None, macro_verified=True):
             prob -= 6   # طمع شديد: السوق قد تكون في قمة
         elif fng_v >= 55:
             prob -= 2
+
+    # 2ج) ضغط الشراء مقابل البيع: طلب حقيقي يرفع الاحتمال، هروب البائعين يخفضه
+    buys, sells = m.get("buys") or 0, m.get("sells") or 0
+    if buys + sells > 0:
+        bp = buys / (buys + sells)
+        if bp >= BUY_PRESSURE_STRONG:
+            prob += 4
+        elif bp <= BUY_PRESSURE_WEAK:
+            prob -= 6
+
+    # 2د) التداول الوهمي: حجم أضعاف السيولة = أرقام مضللة
+    liq_v, vol_v = m.get("liq") or 0, m.get("vol24") or 0
+    if liq_v > 0 and vol_v / liq_v > WASH_RATIO_LIMIT:
+        prob -= 8
+
+    # 2هـ) الترويج المدفوع: الفريق يستثمر في التسويق = استعداد لحركة سعرية
+    if res.get("boosted"):
+        prob += 3
 
     # 3) ذاكرة الخبير: ماذا حصل فعلاً مع إشارات بنفس الفئة؟
     band = band_of(score)

@@ -4,7 +4,23 @@ import time
 from config import (
     SCORE_STRONG_BUY, SCORE_BUY, SCORE_WATCH,
     MIN_LIQUIDITY_USD, MIN_VOLUME_24H_USD, MAX_PAIR_AGE_DAYS,
+    WASH_RATIO_LIMIT, ZERO_WIDTH_CHARS, KNOWN_SYMBOLS,
 )
+
+
+def check_symbol(sym):
+    """يفحص رمز العملة: يرفض الحروف الخفية/التحكم والرموز المُقلّدة لعملات مشهورة.
+    يعيد (مقبول؟, السبب)."""
+    s = (sym or "").strip()
+    if not s:
+        return False, "رمز العملة فارغ"
+    if any(c in ZERO_WIDTH_CHARS for c in s):
+        return False, "رمز العملة فيه حروف مخفية — علامة نصب"
+    if any(ord(c) < 32 or ord(c) == 127 for c in s):
+        return False, "رمز العملة فيه حروف غريبة — علامة نصب"
+    if s.upper() in KNOWN_SYMBOLS:
+        return False, f"تُقلّد رمز عملة مشهورة ({s.upper()}) — غالباً نصب"
+    return True, ""
 
 
 def _f(x, default=0.0):
@@ -24,8 +40,9 @@ def signal_of(score):
     return "AVOID"
 
 
-def analyze_pair(pair, security=None):
-    """تقييم عملة جديدة من بيانات Dexscreener + فحص العقد."""
+def analyze_pair(pair, security=None, boosted=False):
+    """تقييم عملة جديدة من بيانات Dexscreener + فحص العقد.
+    boosted: هل الفريق يروّج لها بترويج مدفوع على Dexscreener؟"""
     reasons, warnings = [], []
     score = 0
 
@@ -42,6 +59,13 @@ def analyze_pair(pair, security=None):
     base = (pair.get("baseToken") or {}).get("symbol", "?")
     quote = (pair.get("quoteToken") or {}).get("symbol", "?")
 
+    # 0) فلتر الرمز المشبوه — رفض فوري
+    ok, why = check_symbol(base)
+    if not ok:
+        warnings.append(f"⛔ {why}")
+        return _result(3, pair, base, quote, price, liq, vol24, pc1h, pc24h,
+                       buys, sells, age_h, reasons, warnings)
+
     # 1) السيولة (20)
     if liq >= 500_000:
         score += 20; reasons.append("سيولة قوية تتجاوز $500K — صعب التلاعب بالسعر")
@@ -54,12 +78,16 @@ def analyze_pair(pair, security=None):
     else:
         warnings.append(f"سيولة ضعيفة (${liq:,.0f}) — خطر الانزلاق السعري")
 
-    # 2) الحجم مقابل السيولة (15)
+    # 2) الحجم مقابل السيولة (15) — مع كشف التداول الوهمي
     ratio = vol24 / liq if liq > 0 else 0
     if 0.2 <= ratio <= 5:
         score += 15; reasons.append("حجم تداول صحي مقابل السيولة")
     elif 5 < ratio <= 15:
         score += 8; reasons.append("حجم مرتفع — زخم قوي حول العملة")
+    elif ratio > WASH_RATIO_LIMIT:
+        # تداول وهمي: الحجم أضعاف السيولة بكثير = نفس الشخص يشتري ويبيع لنفسه
+        score += 2
+        warnings.append("⚠ حجم مشبوه: التداول أضعاف السيولة بكثير — قد يكون وهمياً")
     else:
         score += 3; warnings.append("حجم التداول غير متوازن مع السيولة")
 
@@ -128,17 +156,24 @@ def analyze_pair(pair, security=None):
     else:
         warnings.append("لا موقع ولا حسابات رسمية موثقة")
 
+    # 8) الترويج المدفوع (+5): الفريق يدفع للترويج = اهتمام متزايد واستعداد لحركة
+    if boosted:
+        score += 5
+        reasons.append("الفريق يروّج لها الآن بترويج مدفوع — اهتمام متزايد حولها")
+
     return _result(min(100, score), pair, base, quote, price, liq, vol24,
-                   pc1h, pc24h, buys, sells, age_h, reasons, warnings)
+                   pc1h, pc24h, buys, sells, age_h, reasons, warnings,
+                   boosted=boosted)
 
 
 def _result(score, pair, base, quote, price, liq, vol24, pc1h, pc24h,
-            buys, sells, age_h, reasons, warnings):
+            buys, sells, age_h, reasons, warnings, boosted=False):
     return {
         "score": score,
         "signal": signal_of(score),
         "reasons": reasons,
         "warnings": warnings,
+        "boosted": boosted,
         "display": f"{base}/{quote}",
         "pair_url": pair.get("url", "https://dexscreener.com"),
         "metrics": {

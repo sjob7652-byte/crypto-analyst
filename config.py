@@ -74,6 +74,34 @@ USE_FNG = True
 FNG_API = "https://api.alternative.me/fng/"   # مجاني بدون مفتاح
 MACRO_VERIFY_MAX_DIFF = 2.5  # أقصى فرق مقبول (نقطة مئوية) بين مصدري BTC
 
+# ---------- إشارات الخبير الجديدة (2026-09-21) ----------
+# 1) لائحة الانتظار: عملات "شبه جاهزة" (40-59 نقطة) تُعاد فحصها كل جولة
+WAITLIST_MAX_AGE_H = 6    # أقصى مدة للبقاء في لائحة الانتظار
+WAITLIST_MAX_SIZE = 30    # أقصى عدد عملات في اللائحة
+WAITLIST_ADD_PER_RUN = 5  # إضافات جديدة في كل جولة كحد أقصى
+
+# 6) الفرص الحقيقية في الساعات الأولى — عملة أقدم من هذا لا تُرسل كتنبيه جديد
+NEW_ALERT_MAX_AGE_H = 48
+
+# 3) كشف التداول الوهمي: حجم/سيولة فوق هذا الحد = مشبوه
+WASH_RATIO_LIMIT = 20
+
+# 2) ضغط الشراء/البيع
+BUY_PRESSURE_STRONG = 0.65  # مشترون ≥ 65% = طلب حقيقي
+BUY_PRESSURE_WEAK = 0.40    # مشترون ≤ 40% = الناس تهرب
+
+# 4) فلتر الرموز المشبوهة: حروف خفية مرفوضة + رموز العملات الكبيرة
+#    أي عملة جديدة تحمل رمز عملة مشهورة = مُقلّدة وغالباً نصب
+ZERO_WIDTH_CHARS = set("​‌‍⁠﻿­⁣ㅤ")
+KNOWN_SYMBOLS = {
+    "BTC", "ETH", "USDT", "USDC", "SOL", "BNB", "XRP", "DOGE", "ADA",
+    "TRX", "LINK", "AVAX", "XLM", "SUI", "HBAR", "LTC", "DOT", "BCH",
+    "SHIB", "UNI", "PEPE", "NEAR", "APT", "ARB", "OP", "INJ", "ATOM",
+    "FIL", "TAO", "RENDER", "FET", "WIF", "BONK", "FLOKI", "DAI",
+    "WBTC", "WETH", "STETH", "TON", "ICP", "KAS", "CRO", "POL",
+    "AAVE", "MKR", "SNX", "CRV", "LDO", "GRT", "SAND", "MANA",
+}
+
 # ---------- الخبير: ذاكرة تتعلم من النتائج ----------
 MIN_SAMPLES_FOR_LEARNING = 5  # أقل عدد نتائج سابقة ليعتمد عليها التعلم
 

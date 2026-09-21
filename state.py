@@ -15,9 +15,11 @@ def load():
         s.setdefault("alerted", {})
         s.setdefault("stats", {})
         s.setdefault("history", [])
+        s.setdefault("waitlist", {})
         return s
     except Exception:
-        return {"positions": {}, "alerted": {}, "stats": {}, "history": []}
+        return {"positions": {}, "alerted": {}, "stats": {},
+                "history": [], "waitlist": {}}
 
 
 def save(s):
