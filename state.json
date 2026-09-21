@@ -253,6 +253,25 @@
       "score": 63,
       "band": "60-74",
       "best_hit": null
+    },
+    "dex:solana:Cm8WBjy7dYHkXarBqnAdAGbv97aopUZsZTvuSEbHeP5q": {
+      "kind": "dex",
+      "name": "그록/SOL",
+      "chain": "solana",
+      "pair": "Cm8WBjy7dYHkXarBqnAdAGbv97aopUZsZTvuSEbHeP5q",
+      "symbol": null,
+      "entry": 6.707e-05,
+      "entry_time": 1790003099.109906,
+      "tp_hit": [
+        false,
+        false,
+        false
+      ],
+      "ref_liq": 21987.74,
+      "warned": false,
+      "score": 64,
+      "band": "60-74",
+      "best_hit": null
     }
   },
   "alerted": {
@@ -274,11 +293,12 @@
     "sig:dex:solana:8fbAaFcbUDBzJh9qEr9Qubgxgk2jnqsB5a6JkuzyyARm": 1790000959.8170402,
     "sig:dex:solana:5DcwsSAVcWdzAmE5EVNsZcWHLMssBymoCmw5KUM9ciuw": 1790001911.3195958,
     "sig:dex:solana:3TyDhMqhQdroh9zBo7CpnZ31GbY96jptiPfgX6ktRozH": 1790001911.6520991,
-    "sig:dex:solana:3sbSwgmnpypu5q3VCanuMjWRei3gGq7msaveUBURrcVq": 1790002743.0298407
+    "sig:dex:solana:3sbSwgmnpypu5q3VCanuMjWRei3gGq7msaveUBURrcVq": 1790002743.0298407,
+    "sig:dex:solana:Cm8WBjy7dYHkXarBqnAdAGbv97aopUZsZTvuSEbHeP5q": 1790003098.076807
   },
   "stats": {
     "day": "2026-09-21",
-    "signals_today": 16
+    "signals_today": 17
   },
   "history": [
     {
@@ -296,23 +316,15 @@
       "display": "PUMPCAT/SOL",
       "score": 53,
       "added": 1790001911.652117,
-      "checks": 2
-    },
-    "dex:solana:Cm8WBjy7dYHkXarBqnAdAGbv97aopUZsZTvuSEbHeP5q": {
-      "chain": "solana",
-      "pair": "Cm8WBjy7dYHkXarBqnAdAGbv97aopUZsZTvuSEbHeP5q",
-      "display": "그록/SOL",
-      "score": 49,
-      "added": 1790001911.6521282,
-      "checks": 2
+      "checks": 3
     },
     "dex:solana:5jYdJBnSrtFTmE6C2nVHmPxKjgSdGTAWw4LodTHUbE74": {
       "chain": "solana",
       "pair": "5jYdJBnSrtFTmE6C2nVHmPxKjgSdGTAWw4LodTHUbE74",
       "display": "fomopay/SOL",
-      "score": 48,
+      "score": 53,
       "added": 1790001911.6521325,
-      "checks": 2
+      "checks": 3
     },
     "dex:solana:8WormohZAE1UHyEX65Y5njDzwgEiCPXskr5QhJRdk68d": {
       "chain": "solana",
@@ -320,15 +332,15 @@
       "display": "ZEBRA/SOL",
       "score": 48,
       "added": 1790001911.6521358,
-      "checks": 2
+      "checks": 3
     },
     "dex:solana:3gVpAeyt2PmN4tEzFFuGABqbnZEjUCJvZz8BWRPPyfPk": {
       "chain": "solana",
       "pair": "3gVpAeyt2PmN4tEzFFuGABqbnZEjUCJvZz8BWRPPyfPk",
       "display": "PFROG/SOL",
-      "score": 55,
+      "score": 52,
       "added": 1790002742.540725,
-      "checks": 1
+      "checks": 2
     },
     "dex:solana:75UrvEq1BX9yiYnuTeB4qP8ec5kZGK44zhgddhQnsrpT": {
       "chain": "solana",
@@ -336,15 +348,15 @@
       "display": "FAMCAT/SOL",
       "score": 53,
       "added": 1790002742.5407383,
-      "checks": 1
+      "checks": 2
     },
     "dex:solana:CgpGPj9yE7j1UNRfzrbgXPXvvobtPU9sija7zoDsJSBM": {
       "chain": "solana",
       "pair": "CgpGPj9yE7j1UNRfzrbgXPXvvobtPU9sija7zoDsJSBM",
       "display": "DONK/SOL",
-      "score": 52,
+      "score": 47,
       "added": 1790002742.5407417,
-      "checks": 1
+      "checks": 2
     },
     "dex:bsc:0xBD7160c30931Fb4934568975872196747269f248": {
       "chain": "bsc",
@@ -352,7 +364,49 @@
       "display": "STREET/WBNB",
       "score": 40,
       "added": 1790002742.5407448,
+      "checks": 2
+    },
+    "dex:solana:2T5mR88PFKywepoNmNkZpGSEoqXT2Zj23AEqqaEofZD3": {
+      "chain": "solana",
+      "pair": "2T5mR88PFKywepoNmNkZpGSEoqXT2Zj23AEqqaEofZD3",
+      "display": "PSTOCK/SOL",
+      "score": 50,
+      "added": 1790003098.076585,
+      "checks": 1
+    },
+    "dex:solana:H576ab8k2VMqqsDV6FVupvxmegTWMrhxDTYu12EniqXt": {
+      "chain": "solana",
+      "pair": "H576ab8k2VMqqsDV6FVupvxmegTWMrhxDTYu12EniqXt",
+      "display": "4PAY/SOL",
+      "score": 43,
+      "added": 1790003098.0765958,
       "checks": 1
     }
+  },
+  "paper": {
+    "cash": 90.0,
+    "start": 100.0,
+    "positions": {
+      "dex:solana:Cm8WBjy7dYHkXarBqnAdAGbv97aopUZsZTvuSEbHeP5q": {
+        "kind": "dex",
+        "name": "그록/SOL",
+        "chain": "solana",
+        "pair": "Cm8WBjy7dYHkXarBqnAdAGbv97aopUZsZTvuSEbHeP5q",
+        "symbol": null,
+        "entry": 6.707e-05,
+        "entry_time": 1790003099.1099172,
+        "qty": 149097.95735798418,
+        "invested": 10.0,
+        "realized": 0.0,
+        "tp_hit": [
+          false,
+          false,
+          false
+        ]
+      }
+    },
+    "trades": 1,
+    "wins": 0,
+    "losses": 0
   }
 }
