@@ -25,12 +25,13 @@
       "entry": 3.403e-05,
       "entry_time": 1789999709.6925144,
       "tp_hit": [
-        false,
+        true,
         false,
         false
       ],
       "ref_liq": 16486.25,
-      "warned": false
+      "warned": false,
+      "best_hit": "tp1"
     },
     "dex:solana:H2KJ699rzrbiH8D8E1gQ6J86wLZTTVkrpB9RhXaWnZ54": {
       "kind": "dex",
@@ -175,6 +176,63 @@
       ],
       "ref_liq": 0,
       "warned": false
+    },
+    "dex:solana:Dsn59vuP2qrUCZD2tPoU8Pcf5PvUYHsvuvCxT1sEaRSo": {
+      "kind": "dex",
+      "name": "SWOGE/DOGE",
+      "chain": "solana",
+      "pair": "Dsn59vuP2qrUCZD2tPoU8Pcf5PvUYHsvuvCxT1sEaRSo",
+      "symbol": null,
+      "entry": 0.00017,
+      "entry_time": 1790000958.3537922,
+      "tp_hit": [
+        false,
+        false,
+        false
+      ],
+      "ref_liq": 35628.94,
+      "warned": false,
+      "score": 64,
+      "band": "60-74",
+      "best_hit": null
+    },
+    "dex:solana:6YpUxTGXuNfqmkbJugPw14yT7oNahTv5udhGpXB4MguW": {
+      "kind": "dex",
+      "name": "SUICAT/SUI",
+      "chain": "solana",
+      "pair": "6YpUxTGXuNfqmkbJugPw14yT7oNahTv5udhGpXB4MguW",
+      "symbol": null,
+      "entry": 0.0002781,
+      "entry_time": 1790000958.836591,
+      "tp_hit": [
+        false,
+        false,
+        false
+      ],
+      "ref_liq": 54608.21,
+      "warned": false,
+      "score": 63,
+      "band": "60-74",
+      "best_hit": null
+    },
+    "dex:solana:7kfbyvJYeUFUxdWZ8RswUtygk4bAvWRJnUjdbNahKM24": {
+      "kind": "dex",
+      "name": "PFDOG/SOL",
+      "chain": "solana",
+      "pair": "7kfbyvJYeUFUxdWZ8RswUtygk4bAvWRJnUjdbNahKM24",
+      "symbol": null,
+      "entry": 0.0003787,
+      "entry_time": 1790000959.319815,
+      "tp_hit": [
+        false,
+        false,
+        false
+      ],
+      "ref_liq": 55631.74,
+      "warned": false,
+      "score": 61,
+      "band": "60-74",
+      "best_hit": null
     }
   },
   "alerted": {
@@ -189,10 +247,15 @@
     "watch:WIFUSDT": 1789999714.1054163,
     "watch:BONKUSDT": 1789999714.7446098,
     "watch:FLOKIUSDT": 1789999715.409765,
-    "watch:PNUTUSDT": 1789999716.2330177
+    "watch:PNUTUSDT": 1789999716.2330177,
+    "sig:dex:solana:Dsn59vuP2qrUCZD2tPoU8Pcf5PvUYHsvuvCxT1sEaRSo": 1790000958.3537853,
+    "sig:dex:solana:6YpUxTGXuNfqmkbJugPw14yT7oNahTv5udhGpXB4MguW": 1790000958.8365858,
+    "sig:dex:solana:7kfbyvJYeUFUxdWZ8RswUtygk4bAvWRJnUjdbNahKM24": 1790000959.3198109,
+    "sig:dex:solana:8fbAaFcbUDBzJh9qEr9Qubgxgk2jnqsB5a6JkuzyyARm": 1790000959.8170402
   },
   "stats": {
     "day": "2026-09-21",
-    "signals_today": 11
-  }
+    "signals_today": 14
+  },
+  "history": []
 }
