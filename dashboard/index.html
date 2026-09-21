@@ -287,12 +287,13 @@ function renderCards(list) {
       const kindChip = t.kind === "binance"
         ? `<span class="chip">Binance</span>`
         : `<span class="chip">DEX · ${t.chain || ""}</span>`;
-      // حالة الجني الجزئي: كم بيعنا وكم ربحنا فعلياً
+      // حالة الجني الجزئي: كم بيعنا وكم ربحنا فعلياً + وقف التعادل
       const tpHit = (t.tp_hit || []).filter(Boolean).length;
+      const isBE = t.be || tpHit > 0;
       const origQty = (t.invested && t.entry) ? t.invested / t.entry : 0;
       const remPct = origQty ? Math.round(100 * (t.qty || 0) / origQty) : 100;
-      const partialChip = tpHit > 0
-        ? `<div class="mb-2 text-[11px] font-bold text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-2 py-1" dir="rtl">🎯 جني جزئي: بيع ${100 - remPct}% · ربح مُحقق ${((t.realized || 0) >= 0 ? "+" : "") + fmt$((t.realized || 0))} · المتبقي ${remPct}%</div>`
+      const partialChip = isBE
+        ? `<div class="mb-2 text-[11px] font-bold text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-2 py-1" dir="rtl">🎯 جني 50% | SL @ الدخول — مؤمنة (Risk-Free) 🛡️ · ربح مُحقق ${((t.realized || 0) >= 0 ? "+" : "") + fmt$((t.realized || 0))} · المتبقي ${remPct}%</div>`
         : "";
       return `<div id="trade-${slug(id)}" class="trade-card glass flash p-4">
         <div class="flex items-center gap-3 mb-3">
@@ -421,6 +422,8 @@ async function render(s) {
 }
 
 const REASON_LABEL = {
+  TP1: "🎯 جني جزئي 50%",
+  BE: "⚖️ تعادل (خروج عند الدخول)",
   TP: "🎯 اكتمال الأهداف",
   SL: "🛑 وقف الخسارة",
   RUG: "🚨 انهيار (Rug)",
