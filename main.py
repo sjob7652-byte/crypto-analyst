@@ -18,7 +18,7 @@ from config import (
     WAITLIST_ADD_PER_RUN, POS_REEVAL_MIN_SCORE, POS_REEVAL_MIN_AGE_H,
     VOL_SPIKE_MULT, VOL_SPIKE_LOOKBACK, VOL_SPIKE_COOLDOWN_H,
     PAPER_ENABLED, PAPER_START_BALANCE, PAPER_RISK_PER_TRADE,
-    PAPER_SELL_FRACTIONS, PAPER_SLIPPAGE,
+    PAPER_SELL_FRACTIONS, PAPER_SLIPPAGE, USE_XBRIDGE, XBRIDGE_MAX_AGE_H,
 )
 
 # عتبات الانهيار والقائمة السوداء
@@ -83,6 +83,17 @@ def build_context(s):
                   f"(مكرر مُزال: {nc.stats['dupes_merged']})")
         except Exception as e:
             print("news error:", e)
+    # جسر أخبار X عبر قنوات Telegram (Telethon) — تلميحات إضافية بأدنى ثقة
+    # يعمل فقط عند وجود الأسرار، وإلا يُتجاهل بصمت تام
+    if USE_XBRIDGE:
+        try:
+            import xbridge
+            xb = xbridge.fetch_xbridge_news(max_age_h=XBRIDGE_MAX_AGE_H)
+            if xb:
+                ctx["news"] = (ctx.get("news") or []) + xb
+                print(f"أخبار X⇄TG: {len(xb)} عنصراً من قنوات Telegram")
+        except Exception as e:
+            print("xbridge error:", e)
     if USE_COINGECKO:
         try:
             ctx["trending"] = clients.coingecko_trending()

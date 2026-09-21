@@ -144,3 +144,7 @@ BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 # إستراتيجية إعادة المحاولة عند الحظر المؤقت (429/5xx): 3محاولات بانتظار 3ث ثم 6ث
 BACKOFF_TRIES = 3
 BACKOFF_BASE = 3  # ثواني — يتضاعف بعد كل فشل
+
+# ---------- جسر أخبار X عبر Telegram (Telethon) ----------
+USE_XBRIDGE = True       # يحتاج أسرار TG_API_ID/TG_API_HASH/TG_SESSION/XBRIDGE_CHANNELS
+XBRIDGE_MAX_AGE_H = 6    # أقصى عمر لرسائل القنوات (ساعات)
