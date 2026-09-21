@@ -1,3 +1,5 @@
-requests
-feedparser
-telethon
+# إصدارات مثبتة (Supply Chain Security): لا تستخدم إصدارات عائمة.
+# هذه الإصدارات مُختبرة وتعمل في الإنتاج بتاريخ 2026-09-21.
+requests==2.34.2
+feedparser==6.0.14
+telethon==1.45.0
