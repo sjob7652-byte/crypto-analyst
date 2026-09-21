@@ -144,6 +144,34 @@ def rug_warn_msg(name, price):
     )
 
 
+def pos_deteriorated_msg(name, entry, price, old_score, new_score):
+    """تحذير: مؤشرات صفقة مفتوحة ساءت بعد الدخول — فكر في الخروج المبكر."""
+    try:
+        pnl = (price / entry - 1) * 100
+    except (TypeError, ZeroDivisionError):
+        pnl = 0
+    state = f"ربح +{pnl:.1f}%" if pnl >= 0 else f"خسارة {pnl:.1f}%"
+    return (
+        f"⚠️ <b>انتبه — {html.escape(name)}</b>\n"
+        f"المؤشرات ساءت من بعد ما دخلت (النقاط: {old_score} ← {new_score}).\n"
+        f"السعر الآن: {fmt_price(price)} ({state})\n"
+        f"💡 <b>نصيحة:</b> فكّر تخرج بجزء قبل ما توصل لوقف الخسارة. "
+        f"القرار لك."
+    )
+
+
+def unusual_volume_msg(name, chg, mult):
+    """تنبيه حركة غير عادية: حجم مفاجئ على عملة Binance."""
+    direction = "📈" if chg >= 0 else "📉"
+    return (
+        f"👀 <b>حركة غير عادية: {html.escape(name)}</b> {direction}\n"
+        f"حجم التداول في آخر ساعة تضاعف <b>×{mult:.1f}</b> عن المتوسط — "
+        f"شي حاجة كتوجد.\n"
+        f"السعر: {chg:+.1f}% في 24 ساعة.\n"
+        f"💡 <b>نصيحة:</b> راقبها عن قرب، ولا تدخل إلا بإشارة شراء واضحة."
+    )
+
+
 def digest_msg(date_str, positions, new_signals, movers, ctx):
     lines = [f"📰 <b>ملخص اليوم — {date_str}</b>"]
 

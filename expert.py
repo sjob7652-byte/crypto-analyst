@@ -8,7 +8,8 @@
 3. يأخذ الأخبار ونبض السوق العام بعين الاعتبار.
 """
 from config import (TAKE_PROFITS, STOP_LOSS, MIN_SAMPLES_FOR_LEARNING,
-                    WASH_RATIO_LIMIT, BUY_PRESSURE_STRONG, BUY_PRESSURE_WEAK)
+                    WASH_RATIO_LIMIT, BUY_PRESSURE_STRONG, BUY_PRESSURE_WEAK,
+                    FDV_LIQ_RATIO_LIMIT, TRENDING_PROB_BOOST)
 
 
 def band_of(score):
@@ -55,7 +56,7 @@ def verdict_word(prob):
     return "مخاطرة عالية", "🔴"
 
 
-def simple_reasons(res, coin_news, fng=None):
+def simple_reasons(res, coin_news, fng=None, trending=None):
     """أسباب بسيطة بكلمات سهلة — أقوى 3 إشارات فقط."""
     m = res.get("metrics") or {}
     out = []
@@ -101,6 +102,12 @@ def simple_reasons(res, coin_news, fng=None):
     if res.get("boosted"):
         out.append("فريقها يروّج لها الآن — اهتمام متزايد حولها")
 
+    # رائجة على CoinGecko: ناس حقيقيون يبحثون عنها الآن
+    sym = ((res.get("display") or "").split("/")[0] or "").upper()
+    tr = {str(t).upper() for t in (trending or [])}
+    if sym and sym in tr:
+        out.append("رائجة الآن على CoinGecko — ناس كثيرة كتقلب عليها")
+
     # مؤشر الخوف والطمع: تحذير بسيط عند التطرف
     fng_v = None
     if isinstance(fng, dict):
@@ -119,12 +126,14 @@ def simple_reasons(res, coin_news, fng=None):
     return "، ".join(out[:3])
 
 
-def decide(res, coin_news, btc_chg, band_stats, fng=None, macro_verified=True):
+def decide(res, coin_news, btc_chg, band_stats, fng=None, macro_verified=True,
+           trending=None):
     """يبني القرار النهائي: أسعار + نسبة نجاح + سبب + خبر.
 
     res: نتيجة analyzer | coin_news: أخبار تذكر العملة (من مصادر موثوقة فقط)
     btc_chg: تغير BTC في 24س (نبض السوق) | band_stats: إحصائيات الذاكرة
     fng: مؤشر الخوف والطمع | macro_verified: هل رقم BTC مُتحقق من مصدرين؟
+    trending: رموز العملات الرائجة على CoinGecko
     """
     m = res.get("metrics") or {}
     entry = float(m.get("price") or 0)
@@ -180,6 +189,16 @@ def decide(res, coin_news, btc_chg, band_stats, fng=None, macro_verified=True):
     if res.get("boosted"):
         prob += 3
 
+    # 2و) القيمة السوقية مقابل السيولة: FDV ضخم = خطر إغراق
+    fdv_v = m.get("fdv") or 0
+    if liq_v > 0 and fdv_v / liq_v > FDV_LIQ_RATIO_LIMIT:
+        prob -= 8
+
+    # 2ز) رائجة على CoinGecko: اهتمام حقيقي من الناس
+    sym_u = ((res.get("display") or "").split("/")[0] or "").upper()
+    if sym_u and sym_u in {str(t).upper() for t in (trending or [])}:
+        prob += TRENDING_PROB_BOOST
+
     # 3) ذاكرة الخبير: ماذا حصل فعلاً مع إشارات بنفس الفئة؟
     band = band_of(score)
     bs = (band_stats or {}).get(band)
@@ -207,7 +226,7 @@ def decide(res, coin_news, btc_chg, band_stats, fng=None, macro_verified=True):
         "emoji": emoji,
         "band": band,
         "learned": learned,
-        "reason": simple_reasons(res, coin_news, fng),
+        "reason": simple_reasons(res, coin_news, fng, trending),
         "news": top_news,
         "warn": warn,
         "fng": fng_v,

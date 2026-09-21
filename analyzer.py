@@ -5,6 +5,7 @@ from config import (
     SCORE_STRONG_BUY, SCORE_BUY, SCORE_WATCH,
     MIN_LIQUIDITY_USD, MIN_VOLUME_24H_USD, MAX_PAIR_AGE_DAYS,
     WASH_RATIO_LIMIT, ZERO_WIDTH_CHARS, KNOWN_SYMBOLS,
+    FDV_LIQ_RATIO_LIMIT,
 )
 
 
@@ -53,6 +54,7 @@ def analyze_pair(pair, security=None, boosted=False):
     pc = pair.get("priceChange") or {}
     pc1h, pc24h = _f(pc.get("h1")), _f(pc.get("h24"))
     price = _f(pair.get("priceUsd"))
+    fdv = _f(pair.get("fdv"))
     created = pair.get("pairCreatedAt") or 0
     age_h = (time.time() * 1000 - created) / 3_600_000 if created else 99999
     info = pair.get("info") or {}
@@ -90,6 +92,12 @@ def analyze_pair(pair, security=None, boosted=False):
         warnings.append("⚠ حجم مشبوه: التداول أضعاف السيولة بكثير — قد يكون وهمياً")
     else:
         score += 3; warnings.append("حجم التداول غير متوازن مع السيولة")
+
+    # 2ب) القيمة السوقية مقابل السيولة: FDV ضخم + سيولة صغيرة = خطر إغراق
+    if liq > 0 and fdv > 0 and fdv / liq > FDV_LIQ_RATIO_LIMIT:
+        score -= 8
+        warnings.append("⚠ قيمتها السوقية كبيرة بزاف مقابل سيولتها "
+                        "— الفريق يقدر يغرق السوق في أي لحظة")
 
     # 3) ضغط الشراء/البيع (10)
     total = buys + sells
@@ -161,13 +169,13 @@ def analyze_pair(pair, security=None, boosted=False):
         score += 5
         reasons.append("الفريق يروّج لها الآن بترويج مدفوع — اهتمام متزايد حولها")
 
-    return _result(min(100, score), pair, base, quote, price, liq, vol24,
-                   pc1h, pc24h, buys, sells, age_h, reasons, warnings,
-                   boosted=boosted)
+    return _result(max(0, min(100, score)), pair, base, quote, price, liq,
+                   vol24, pc1h, pc24h, buys, sells, age_h, reasons, warnings,
+                   boosted=boosted, fdv=fdv)
 
 
 def _result(score, pair, base, quote, price, liq, vol24, pc1h, pc24h,
-            buys, sells, age_h, reasons, warnings, boosted=False):
+            buys, sells, age_h, reasons, warnings, boosted=False, fdv=0):
     return {
         "score": score,
         "signal": signal_of(score),
@@ -177,7 +185,7 @@ def _result(score, pair, base, quote, price, liq, vol24, pc1h, pc24h,
         "display": f"{base}/{quote}",
         "pair_url": pair.get("url", "https://dexscreener.com"),
         "metrics": {
-            "price": price, "liq": liq, "vol24": vol24,
+            "price": price, "liq": liq, "vol24": vol24, "fdv": fdv,
             "pc1h": pc1h, "pc24h": pc24h,
             "buys": buys, "sells": sells, "age_h": age_h,
         },

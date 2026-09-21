@@ -15,7 +15,8 @@ from config import (
     MIN_TXNS_24H, MAX_PAIR_AGE_DAYS, WATCHLIST, TAKE_PROFITS, STOP_LOSS,
     POSITION_MAX_AGE_DAYS, DIGEST_HOURS_UTC, USE_COINGECKO, USE_NEWS,
     USE_FNG, NEW_ALERT_MAX_AGE_H, WAITLIST_MAX_AGE_H, WAITLIST_MAX_SIZE,
-    WAITLIST_ADD_PER_RUN,
+    WAITLIST_ADD_PER_RUN, POS_REEVAL_MIN_SCORE, POS_REEVAL_MIN_AGE_H,
+    VOL_SPIKE_MULT, VOL_SPIKE_LOOKBACK, VOL_SPIKE_COOLDOWN_H,
 )
 
 
@@ -71,10 +72,13 @@ def make_verdict(res, ctx):
     sym = coin_symbol(res)
     coin_news = nc.for_coin(sym) if nc else []
     macro = ctx.get("macro") or {}
+    trending = [t.get("symbol") for t in (ctx.get("trending") or [])
+                if t.get("symbol")]
     return expert.decide(res, coin_news, macro.get("btc_chg"),
                          ctx.get("band_stats"),
                          fng=ctx.get("fng"),
-                         macro_verified=macro.get("verified", False))
+                         macro_verified=macro.get("verified", False),
+                         trending=trending)
 
 
 def pick_best_pair(pairs):
@@ -303,6 +307,19 @@ def update_positions(s, dry_run):
             pos["warned"] = True
             print(f"  -> تحذير سيولة: {pos['name']}")
             alerts.send(alerts.rug_warn_msg(pos["name"], price), dry_run)
+        # إعادة تقييم الصفقة: هل المؤشرات ساءت من بعد الدخول؟
+        if (pos["kind"] == "dex" and not pos.get("deteriorated_warned")
+                and time.time() - pos["entry_time"] > POS_REEVAL_MIN_AGE_H * 3600):
+            pp = clients.get_pair(pos["chain"], pos["pair"])
+            if pp:
+                rr = analyzer.analyze_pair(pp, None)
+                if rr["score"] < POS_REEVAL_MIN_SCORE:
+                    pos["deteriorated_warned"] = True
+                    print(f"  -> تحذير تدهور: {pos['name']} "
+                          f"({pos.get('score')} → {rr['score']})")
+                    alerts.send(alerts.pos_deteriorated_msg(
+                        pos["name"], entry, price,
+                        pos.get("score"), rr["score"]), dry_run)
         # انتهاء مدة المتابعة
         if time.time() - pos["entry_time"] > POSITION_MAX_AGE_DAYS * 86400:
             st.record_outcome(s, pos, pos.get("best_hit") or "expired")
@@ -325,6 +342,26 @@ def scan_watchlist(s, dry_run, ctx):
             continue
         movers.append((sym.replace("USDT", ""), chg))
         k = clients.binance_klines(sym)
+        # كشف الضخ المفاجئ: حجم آخر ساعة مقابل متوسط الساعات السابقة
+        try:
+            vols = [float(x[5]) for x in k[-(VOL_SPIKE_LOOKBACK + 1):-1]
+                    if len(x) > 5]
+            last_v = float(k[-1][5]) if k and len(k[-1]) > 5 else 0
+            if vols and last_v > 0:
+                avg_v = sum(vols) / len(vols)
+                if avg_v > 0 and last_v >= VOL_SPIKE_MULT * avg_v:
+                    vkey = f"volspike:{sym}"
+                    wkey = f"watch:{sym}"
+                    now_t = time.time()
+                    if now_t - s["alerted"].get(vkey, 0) > VOL_SPIKE_COOLDOWN_H * 3600 \
+                            and now_t - s["alerted"].get(wkey, 0) > VOL_SPIKE_COOLDOWN_H * 3600:
+                        mult = last_v / avg_v
+                        print(f"  -> حركة غير عادية: {sym} (الحجم ×{mult:.1f})")
+                        alerts.send(alerts.unusual_volume_msg(
+                            sym.replace("USDT", ""), chg, mult), dry_run)
+                        s["alerted"][vkey] = now_t
+        except Exception:
+            pass
         res = analyzer.analyze_binance(sym, t, k)
         key = f"watch:{sym}"
         if res["signal"] in ("BUY", "STRONG_BUY") \
