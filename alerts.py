@@ -233,6 +233,20 @@ def paper_closed_msg(name, pnl_usd, pnl_pct, reason, cash):
     )
 
 
+def paper_tp_msg(name, level_idx, sold_pct, proceeds, realized, remaining_pct, cash):
+    """تنبيه الجني الجزئي الحقيقي — يُرسل عند تنفيذ بيع جزئي فعلي في المحفظة الوهمية."""
+    pct = int(TAKE_PROFITS[level_idx] * 100)
+    return (
+        f"🎯 <b>جني جزئي حقيقي — {html.escape(name)}</b>\n"
+        f"وصل الهدف {level_idx + 1} (+{pct}%) — تم بيع <b>{sold_pct:.0f}%</b> من الصفقة فعلياً\n"
+        f"💵 عائد البيع: ${proceeds:.2f}\n"
+        f"🔒 ربح مُحقق لحد الآن: ${realized:+.2f}\n"
+        f"📌 المتبقي في الصفقة: {remaining_pct:.0f}% (يكمل للأهداف الباقية)\n"
+        f"💰 الرصيد النقدي الآن: ${cash:.2f}\n"
+        f"<i>تجربة وهمية — ليست أموالاً حقيقية.</i>"
+    )
+
+
 def rug_warn_msg(name, price):
     return (
         f"🚨 <b>خطر! {html.escape(name)}</b>\n"

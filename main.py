@@ -501,6 +501,15 @@ def update_paper(s, dry_run):
                         pos["name"], pnl,
                         pnl / pos["invested"] * 100 if pos["invested"] else 0,
                         "اكتملت الأهداف 🎯", p["cash"]), dry_run)
+                else:
+                    # جني جزئي حقيقي: نُعلن البيع الفعلي لا مجرد نصيحة
+                    orig_qty = pos["invested"] / entry if entry else 0
+                    remaining_pct = (pos["qty"] / orig_qty * 100
+                                     if orig_qty else 0)
+                    alerts.send(alerts.paper_tp_msg(
+                        pos["name"], i, PAPER_SELL_FRACTIONS[i] * 100,
+                        proceeds, pos["realized"], remaining_pct,
+                        p["cash"]), dry_run)
                 break
         if pid in closed:
             continue
