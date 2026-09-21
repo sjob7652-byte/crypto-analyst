@@ -18,7 +18,7 @@ from config import (
     WAITLIST_ADD_PER_RUN, POS_REEVAL_MIN_SCORE, POS_REEVAL_MIN_AGE_H,
     VOL_SPIKE_MULT, VOL_SPIKE_LOOKBACK, VOL_SPIKE_COOLDOWN_H,
     PAPER_ENABLED, PAPER_START_BALANCE, PAPER_RISK_PER_TRADE,
-    PAPER_MAX_POSITIONS, PAPER_SELL_FRACTIONS,
+    PAPER_MAX_POSITIONS, PAPER_SELL_FRACTIONS, PAPER_SLIPPAGE,
 )
 
 
@@ -275,21 +275,24 @@ def paper_buy(s, res):
     if amount < 5:
         return
     p["cash"] -= amount
+    # سعر التنفيذ الواقعي: الشراء بسعر أغلى بسبب الانزلاق السعري
+    eff_entry = price * (1 + PAPER_SLIPPAGE)
     p["positions"][pid] = {
         "kind": res["kind"],
         "name": res["display"],
         "chain": res.get("chain"),
         "pair": res.get("pair"),
         "symbol": res.get("symbol"),
-        "entry": price,
+        "entry": eff_entry,
         "entry_time": time.time(),
-        "qty": amount / price,
+        "qty": amount / eff_entry,
         "invested": amount,
         "realized": 0.0,
         "tp_hit": [False] * len(TAKE_PROFITS),
     }
     p["trades"] += 1
-    print(f"  -> محفظة وهمية: شراء {res['display']} بـ ${amount:.2f}")
+    print(f"  -> محفظة وهمية: شراء {res['display']} بـ ${amount:.2f} "
+          f"(تنفيذ: {eff_entry:.6g} بعد الانزلاق)")
 
 
 def update_paper(s, dry_run):
@@ -304,17 +307,20 @@ def update_paper(s, dry_run):
         if not price:
             continue
         entry = pos["entry"]
+        # سعر التنفيذ الواقعي عند البيع (أرخص بسبب الانزلاق) — التفعيل يبقى
+        # على سعر السوق الخام، لكن التنفيذ الفعلي ينزلق
+        eff_price = price * (1 - PAPER_SLIPPAGE)
         # أهداف البيع (بيع جزئي)
         for i, tp in enumerate(TAKE_PROFITS):
             if not pos["tp_hit"][i] and price >= entry * (1 + tp):
                 pos["tp_hit"][i] = True
                 sell_qty = pos["qty"] * PAPER_SELL_FRACTIONS[i]
-                proceeds = sell_qty * price
+                proceeds = sell_qty * eff_price
                 pos["qty"] -= sell_qty
                 pos["realized"] += proceeds - sell_qty * entry
                 p["cash"] += proceeds
                 print(f"  -> وهمي: بيع {pos['name']} عند TP{i + 1} "
-                      f"(${proceeds:.2f})")
+                      f"(${proceeds:.2f} بعد الانزلاق)")
                 if all(pos["tp_hit"]):
                     pnl = pos["realized"]
                     if pnl >= 0:
@@ -331,7 +337,7 @@ def update_paper(s, dry_run):
             continue
         # وقف الخسارة: بيع كل الكمية المتبقية
         if price <= entry * (1 - STOP_LOSS):
-            proceeds = pos["qty"] * price
+            proceeds = pos["qty"] * eff_price
             pnl = proceeds - pos["qty"] * entry + pos["realized"]
             p["cash"] += proceeds
             p["losses"] += 1
@@ -344,7 +350,7 @@ def update_paper(s, dry_run):
             continue
         # انتهاء مدة المتابعة: بيع بسعر السوق
         if time.time() - pos["entry_time"] > POSITION_MAX_AGE_DAYS * 86400:
-            proceeds = pos["qty"] * price
+            proceeds = pos["qty"] * eff_price
             pnl = proceeds - pos["qty"] * entry + pos["realized"]
             p["cash"] += proceeds
             if pnl >= 0:
