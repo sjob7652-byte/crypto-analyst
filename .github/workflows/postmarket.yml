@@ -1,0 +1,56 @@
+name: Post-Market Analysis
+
+# تقرير ما بعد السوق اليومي: 22:59 UTC = 23:59 بتوقيت المغرب
+# (قد يتأخر بضع دقائق حسب ازدحام GitHub)
+on:
+  schedule:
+    - cron: "59 22 * * *"
+  workflow_dispatch:
+
+# نفس مجموعة الفحص: يعمل وحده لتفادي التعارض على حالة Gist
+concurrency:
+  group: memecoin-scan
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: جلب الكود
+        uses: actions/checkout@v4
+
+      - name: استعادة حالة البوت
+        uses: actions/cache/restore@v4
+        with:
+          path: state.json
+          key: bot-state-${{ github.run_id }}
+          restore-keys: |
+            bot-state-
+
+      - name: تثبيت Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: تثبيت المكتبات
+        run: pip install -r requirements.txt
+
+      - name: تحليل اليوم وإرسال التقرير
+        run: python postmarket.py
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+          GIST_ID: ${{ secrets.GIST_ID }}
+          # اختياري: إن كان البوت يعمل على خادوم خاص مع Ollama
+          # OLLAMA_HOST: http://localhost:11434
+          # OLLAMA_MODEL: llama3.1
+
+      - name: حفظ الحالة للجولة القادمة
+        uses: actions/cache/save@v4
+        with:
+          path: state.json
+          key: bot-state-${{ github.run_id }}
