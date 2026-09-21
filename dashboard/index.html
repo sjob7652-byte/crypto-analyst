@@ -12,6 +12,8 @@
   .pos { color:#22c55e; } .neg { color:#ef4444; }
   .flash { animation: flash 1s; }
   @keyframes flash { 0%{background:#1e293b} 100%{background:transparent} }
+  #t-body tr { scroll-margin-top: 90px; }
+  #t-body tr:target { background: rgba(59,130,246,.18); }
 </style>
 </head>
 <body class="text-slate-200 min-h-screen">
@@ -128,6 +130,7 @@ async function render(s) {
   $("c-hit").textContent = hist.length ? Math.round(100 * wins / hist.length) + "% (" + hist.length + ")" : "—";
 
   // الصفقات بأسعار حية
+  const slug = id => String(id || "").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   let equity = p.cash || 0, rows = "";
   for (const id of ids) {
     const t = pos[id];
@@ -137,7 +140,7 @@ async function render(s) {
     const val = (t.qty || 0) * px;
     equity += val;
     const cls = pnl >= 0 ? "pos" : "neg";
-    rows += `<tr class="border-b border-slate-800 flash">
+    rows += `<tr id="trade-${slug(id)}" class="border-b border-slate-800 flash">
       <td class="p-3 font-bold">${t.name || id}</td>
       <td class="p-3" dir="ltr">${Number(t.entry).toPrecision(4)}</td>
       <td class="p-3 ${cls}" dir="ltr">${live ? Number(live).toPrecision(4) : "—"}</td>
