@@ -1,22 +1,38 @@
 # -*- coding: utf-8 -*-
 """عملاء مصادر البيانات المجانية: Dexscreener / honeypot.is / Binance."""
+import time
+import random
 import requests
 from config import (
     DEXSCREENER_API, HONEYPOT_API, HONEYPOT_CHAIN_IDS, RUGCHECK_API,
-    BINANCE_API, CHAINS, REQUEST_TIMEOUT, USER_AGENT,
+    BINANCE_API, CHAINS, REQUEST_TIMEOUT, USER_AGENT, BROWSER_UA,
+    BACKOFF_TRIES, BACKOFF_BASE,
 )
 
 _session = requests.Session()
-_session.headers.update({"User-Agent": USER_AGENT})
+_session.headers.update({"User-Agent": BROWSER_UA,
+                         "Accept": "application/json"})
 
 
 def _get(url, params=None):
-    try:
-        r = _session.get(url, params=params, timeout=REQUEST_TIMEOUT)
-        if r.status_code == 200:
-            return r.json()
-    except Exception:
-        pass
+    """طلب GET مع حماية من الحظر المؤقت:
+    - بصمة متصفح حقيقي (User-Agent) لتفادي حظر عناوين البوتات
+    - Exponential Backoff عند 429/5xx: انتظار 3ث ثم 6ث ثم التخلي
+    - الأخطاء الدائمة (404 وغيرها) لا تُعاد — لا فائدة"""
+    wait = BACKOFF_BASE
+    for _ in range(BACKOFF_TRIES):
+        try:
+            r = _session.get(url, params=params, timeout=REQUEST_TIMEOUT)
+            if r.status_code == 200:
+                return r.json()
+            if r.status_code in (429, 500, 502, 503, 504):
+                time.sleep(wait + random.uniform(0, 1))
+                wait *= 2
+                continue
+            return None
+        except Exception:
+            time.sleep(wait + random.uniform(0, 1))
+            wait *= 2
     return None
 
 
@@ -144,7 +160,7 @@ import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone, timedelta
 from config import (COINGECKO_API, NEWS_FEEDS, NEWS_LOOKBACK_HOURS,
-                    NEWS_MAX_ITEMS, USER_AGENT, TIER_WEIGHTS,
+                    NEWS_MAX_ITEMS, USER_AGENT, BROWSER_UA, TIER_WEIGHTS,
                     NEWS_MIN_TITLE_LEN, NEWS_DEDUPE_SIM,
                     NEWS_MIN_TIER_FOR_COIN, FNG_API,
                     MACRO_VERIFY_MAX_DIFF)
@@ -186,7 +202,7 @@ def fear_greed():
     """مؤشر الخوف والطمع للكريبتو (0-100) — مجاني بدون مفتاح."""
     try:
         req = urllib.request.Request(
-            FNG_API + "?limit=1", headers={"User-Agent": "Mozilla/5.0"})
+            FNG_API + "?limit=1", headers={"User-Agent": BROWSER_UA})
         data = json.loads(urllib.request.urlopen(req, timeout=12).read().decode())
         d = data["data"][0]
         return {"value": int(d["value"]),
@@ -263,7 +279,7 @@ class NewsClient:
             tier = feed[2] if len(feed) > 2 else 3
             try:
                 req = urllib.request.Request(
-                    url, headers={"User-Agent": "Mozilla/5.0"})
+                    url, headers={"User-Agent": BROWSER_UA})
                 raw = urllib.request.urlopen(req, timeout=12).read()
                 root = ET.fromstring(raw)
                 got = (self._parse_rss(root, name, tier)

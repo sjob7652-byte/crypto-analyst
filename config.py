@@ -137,3 +137,9 @@ HONEYPOT_CHAIN_IDS = {
 
 REQUEST_TIMEOUT = 20
 USER_AGENT = "memecoin-analyst/1.0 (free-tier)"
+# بصمة متصفح حقيقي: بعض الـAPIs تحظر عناوين البوتات المعروفة (429)
+BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+# إستراتيجية إعادة المحاولة عند الحظر المؤقت (429/5xx): 3محاولات بانتظار 3ث ثم 6ث
+BACKOFF_TRIES = 3
+BACKOFF_BASE = 3  # ثواني — يتضاعف بعد كل فشل
