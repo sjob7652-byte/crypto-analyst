@@ -210,6 +210,15 @@ async function dexPrice(chain, pair) {
   } catch { return null; }
 }
 
+// سعر حي لعملات Binance (API عام مجاني، بلا مفتاح)
+async function binancePrice(symbol) {
+  try {
+    const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`, {cache: "no-store"});
+    const j = await r.json();
+    return j.price ? parseFloat(j.price) : null;
+  } catch { return null; }
+}
+
 // مزاج السوق: الخوف والطمع + البيتكوين (مصادر عامة مجانية)
 async function loadSentiment() {
   try {
@@ -320,7 +329,9 @@ async function render(s) {
   const cards = [];
   for (const id of ids) {
     const t = pos[id];
-    const live = (t.chain && t.pair) ? await dexPrice(t.chain, t.pair) : null;
+    const live = (t.chain && t.pair) ? await dexPrice(t.chain, t.pair)
+      : (t.kind === "binance" && t.symbol) ? await binancePrice(t.symbol)
+      : null;
     const px = live || t.entry;
     equity += (t.qty || 0) * px;
     cards.push({id, t, live, px});
