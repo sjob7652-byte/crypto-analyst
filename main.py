@@ -20,6 +20,7 @@ from config import (
     VOL_SPIKE_MULT, VOL_SPIKE_LOOKBACK, VOL_SPIKE_COOLDOWN_H,
     PAPER_ENABLED, PAPER_START_BALANCE, PAPER_RISK_PER_TRADE,
     PAPER_SELL_FRACTIONS, PAPER_SLIPPAGE, USE_XBRIDGE, XBRIDGE_MAX_AGE_H,
+    MIN_PROBABILITY,
 )
 
 # عتبات الانهيار والقائمة السوداء
@@ -156,6 +157,32 @@ def pick_best_pair(pairs):
     return [p for p, _ in best.values()]
 
 
+def _demote_to_watch(s, res, verdict):
+    """صفقة تحت عتبة الثقة: تُنقل للمراقبة بدل الدخول —
+    لا تنبيه Telegram ولا صفقة وهمية. تُعاد فحصها في الجولات القادمة
+    (قد تتحسن مؤشراتها فتتجاوز العتبة)."""
+    wl = s.setdefault("waitlist", {})
+    wid = res["id"]
+    if wid in wl:
+        wl[wid]["score"] = res.get("score")  # تحديث النقاط للجولة القادمة
+    elif len(wl) < WAITLIST_MAX_SIZE:
+        wl[wid] = {
+            "chain": res.get("chain"), "pair": res.get("pair"),
+            "display": res.get("display"), "score": res.get("score"),
+            "added": time.time(), "checks": 0,
+        }
+    print(f"  -> ⏸ تحت عتبة الثقة ({verdict['prob']}% < {MIN_PROBABILITY}%): "
+          f"{res.get('display')} — مراقبة فقط")
+
+
+def below_threshold(verdict):
+    """هل نسبة النجاح التقديرية تحت الحد الأدنى للدخول؟"""
+    try:
+        return int(verdict.get("prob", 0)) < MIN_PROBABILITY
+    except (TypeError, ValueError):
+        return True  # رقم غير صالح = لا دخول (افتراض آمن)
+
+
 def scan_new_coins(s, dry_run, ctx):
     print("=== فحص العملات الجديدة ===")
     profiles = clients.latest_profiles()
@@ -236,6 +263,10 @@ def scan_new_coins(s, dry_run, ctx):
             verdict = make_verdict(res, ctx)
             print(f"  -> إشارة {res['signal']}: {res['display']} "
                   f"({res['score']}) نجاح~{verdict['prob']}%")
+            # عتبة الثقة: نسبة ضعيفة = مراقبة فقط (لا دخول ولا تنبيه)
+            if below_threshold(verdict):
+                _demote_to_watch(s, res, verdict)
+                continue
             # التنبيه لا يُرسل إلا بعد فتح الصفقة (متابعة + وهمية) بنجاح
             if not open_position(s, res, verdict):
                 continue
@@ -312,6 +343,10 @@ def check_waitlist(s, dry_run, ctx):
             verdict = make_verdict(res, ctx)
             print(f"  -> 🔄 تحسّنت: {res['display']} ({res['score']}) "
                   f"نجاح~{verdict['prob']}%")
+            # عتبة الثقة: تبقى في المراقبة حتى تتجاوز الحد
+            if below_threshold(verdict):
+                _demote_to_watch(s, res, verdict)
+                continue
             # التنبيه لا يُرسل إلا بعد فتح الصفقة (متابعة + وهمية) بنجاح
             if not open_position(s, res, verdict):
                 wl.pop(wid, None)

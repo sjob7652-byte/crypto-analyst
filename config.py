@@ -157,6 +157,10 @@ TG_RETRY_BASE = 2
 # طابور الرسائل الفاشلة: أقصى عدد رسائل معلقة تُحفظ بين الجولات
 TG_PENDING_MAX = 20
 
+# عتبة الثقة: صفقة بنسبة نجاح تقديرية تحتها = مراقبة فقط (لا دخول ولا تنبيه)
+# الفصل بين "جمع البيانات" و"القنص الانتقائي"
+MIN_PROBABILITY = 50
+
 # ---------- جسر أخبار X عبر Telegram (Telethon) ----------
 USE_XBRIDGE = True       # يحتاج أسرار TG_API_ID/TG_API_HASH/TG_SESSION/XBRIDGE_CHANNELS
 XBRIDGE_MAX_AGE_H = 6    # أقصى عمر لرسائل القنوات (ساعات)
