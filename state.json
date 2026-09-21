@@ -9,12 +9,13 @@
       "entry": 3.168e-05,
       "entry_time": 1789999709.3515413,
       "tp_hit": [
-        false,
+        true,
         false,
         false
       ],
       "ref_liq": 16714.38,
-      "warned": false
+      "warned": false,
+      "best_hit": "tp1"
     },
     "dex:solana:Dqrok6Yu6ZrE87V92xHAuMdwXhwCGk5usDcng1EUKMWu": {
       "kind": "dex",
@@ -272,7 +273,8 @@
     "sig:dex:solana:7kfbyvJYeUFUxdWZ8RswUtygk4bAvWRJnUjdbNahKM24": 1790000959.3198109,
     "sig:dex:solana:8fbAaFcbUDBzJh9qEr9Qubgxgk2jnqsB5a6JkuzyyARm": 1790000959.8170402,
     "sig:dex:solana:5DcwsSAVcWdzAmE5EVNsZcWHLMssBymoCmw5KUM9ciuw": 1790001911.3195958,
-    "sig:dex:solana:3TyDhMqhQdroh9zBo7CpnZ31GbY96jptiPfgX6ktRozH": 1790001911.6520991
+    "sig:dex:solana:3TyDhMqhQdroh9zBo7CpnZ31GbY96jptiPfgX6ktRozH": 1790001911.6520991,
+    "sig:dex:solana:3sbSwgmnpypu5q3VCanuMjWRei3gGq7msaveUBURrcVq": 1790002743.0298407
   },
   "stats": {
     "day": "2026-09-21",
@@ -294,15 +296,15 @@
       "display": "PUMPCAT/SOL",
       "score": 53,
       "added": 1790001911.652117,
-      "checks": 1
+      "checks": 2
     },
     "dex:solana:Cm8WBjy7dYHkXarBqnAdAGbv97aopUZsZTvuSEbHeP5q": {
       "chain": "solana",
       "pair": "Cm8WBjy7dYHkXarBqnAdAGbv97aopUZsZTvuSEbHeP5q",
       "display": "그록/SOL",
-      "score": 56,
+      "score": 49,
       "added": 1790001911.6521282,
-      "checks": 1
+      "checks": 2
     },
     "dex:solana:5jYdJBnSrtFTmE6C2nVHmPxKjgSdGTAWw4LodTHUbE74": {
       "chain": "solana",
@@ -310,7 +312,7 @@
       "display": "fomopay/SOL",
       "score": 48,
       "added": 1790001911.6521325,
-      "checks": 1
+      "checks": 2
     },
     "dex:solana:8WormohZAE1UHyEX65Y5njDzwgEiCPXskr5QhJRdk68d": {
       "chain": "solana",
@@ -318,14 +320,38 @@
       "display": "ZEBRA/SOL",
       "score": 48,
       "added": 1790001911.6521358,
+      "checks": 2
+    },
+    "dex:solana:3gVpAeyt2PmN4tEzFFuGABqbnZEjUCJvZz8BWRPPyfPk": {
+      "chain": "solana",
+      "pair": "3gVpAeyt2PmN4tEzFFuGABqbnZEjUCJvZz8BWRPPyfPk",
+      "display": "PFROG/SOL",
+      "score": 55,
+      "added": 1790002742.540725,
       "checks": 1
     },
-    "dex:solana:FNpVzcdY4dQwJGiAoVHdWSGPAkwqpot4hxSHCMr6CEes": {
+    "dex:solana:75UrvEq1BX9yiYnuTeB4qP8ec5kZGK44zhgddhQnsrpT": {
       "chain": "solana",
-      "pair": "FNpVzcdY4dQwJGiAoVHdWSGPAkwqpot4hxSHCMr6CEes",
-      "display": "SOLTES/SOL",
-      "score": 50,
-      "added": 1790001911.6521385,
+      "pair": "75UrvEq1BX9yiYnuTeB4qP8ec5kZGK44zhgddhQnsrpT",
+      "display": "FAMCAT/SOL",
+      "score": 53,
+      "added": 1790002742.5407383,
+      "checks": 1
+    },
+    "dex:solana:CgpGPj9yE7j1UNRfzrbgXPXvvobtPU9sija7zoDsJSBM": {
+      "chain": "solana",
+      "pair": "CgpGPj9yE7j1UNRfzrbgXPXvvobtPU9sija7zoDsJSBM",
+      "display": "DONK/SOL",
+      "score": 52,
+      "added": 1790002742.5407417,
+      "checks": 1
+    },
+    "dex:bsc:0xBD7160c30931Fb4934568975872196747269f248": {
+      "chain": "bsc",
+      "pair": "0xBD7160c30931Fb4934568975872196747269f248",
+      "display": "STREET/WBNB",
+      "score": 40,
+      "added": 1790002742.5407448,
       "checks": 1
     }
   }
