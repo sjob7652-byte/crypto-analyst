@@ -4,7 +4,14 @@ import json
 import os
 import time
 
+from config import PAPER_START_BALANCE
+
 PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")
+
+
+def _default_paper():
+    return {"cash": PAPER_START_BALANCE, "start": PAPER_START_BALANCE,
+            "positions": {}, "trades": 0, "wins": 0, "losses": 0}
 
 
 def load():
@@ -16,10 +23,11 @@ def load():
         s.setdefault("stats", {})
         s.setdefault("history", [])
         s.setdefault("waitlist", {})
+        s.setdefault("paper", _default_paper())
         return s
     except Exception:
         return {"positions": {}, "alerted": {}, "stats": {},
-                "history": [], "waitlist": {}}
+                "history": [], "waitlist": {}, "paper": _default_paper()}
 
 
 def save(s):

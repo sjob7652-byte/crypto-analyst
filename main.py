@@ -17,6 +17,8 @@ from config import (
     USE_FNG, NEW_ALERT_MAX_AGE_H, WAITLIST_MAX_AGE_H, WAITLIST_MAX_SIZE,
     WAITLIST_ADD_PER_RUN, POS_REEVAL_MIN_SCORE, POS_REEVAL_MIN_AGE_H,
     VOL_SPIKE_MULT, VOL_SPIKE_LOOKBACK, VOL_SPIKE_COOLDOWN_H,
+    PAPER_ENABLED, PAPER_START_BALANCE, PAPER_RISK_PER_TRADE,
+    PAPER_MAX_POSITIONS, PAPER_SELL_FRACTIONS,
 )
 
 
@@ -252,6 +254,125 @@ def open_position(s, res, verdict=None):
         "band": (verdict or {}).get("band") or expert.band_of(res.get("score")),
         "best_hit": None,
     }
+    paper_buy(s, res)
+
+
+def paper_buy(s, res):
+    """شراء وهمي: يخصم من الرصيد الافتراضي ويفتح صفقة وهمية (بلا مخاطرة)."""
+    if not PAPER_ENABLED:
+        return
+    p = s["paper"]
+    m = res["metrics"]
+    price = m.get("price")
+    if not price:
+        return
+    pid = res["id"]
+    if pid in p["positions"]:
+        return
+    if len(p["positions"]) >= PAPER_MAX_POSITIONS:
+        return
+    amount = min(PAPER_RISK_PER_TRADE, p["cash"])
+    if amount < 5:
+        return
+    p["cash"] -= amount
+    p["positions"][pid] = {
+        "kind": res["kind"],
+        "name": res["display"],
+        "chain": res.get("chain"),
+        "pair": res.get("pair"),
+        "symbol": res.get("symbol"),
+        "entry": price,
+        "entry_time": time.time(),
+        "qty": amount / price,
+        "invested": amount,
+        "realized": 0.0,
+        "tp_hit": [False] * len(TAKE_PROFITS),
+    }
+    p["trades"] += 1
+    print(f"  -> محفظة وهمية: شراء {res['display']} بـ ${amount:.2f}")
+
+
+def update_paper(s, dry_run):
+    """يتابع الصفقات الوهمية: بيع جزئي عند الأهداف، بيع كامل عند وقف الخسارة."""
+    p = s["paper"]
+    if not p["positions"]:
+        return
+    print("=== المحفظة الافتراضية ===")
+    closed = []
+    for pid, pos in list(p["positions"].items()):
+        price, _liq = current_price(pos)
+        if not price:
+            continue
+        entry = pos["entry"]
+        # أهداف البيع (بيع جزئي)
+        for i, tp in enumerate(TAKE_PROFITS):
+            if not pos["tp_hit"][i] and price >= entry * (1 + tp):
+                pos["tp_hit"][i] = True
+                sell_qty = pos["qty"] * PAPER_SELL_FRACTIONS[i]
+                proceeds = sell_qty * price
+                pos["qty"] -= sell_qty
+                pos["realized"] += proceeds - sell_qty * entry
+                p["cash"] += proceeds
+                print(f"  -> وهمي: بيع {pos['name']} عند TP{i + 1} "
+                      f"(${proceeds:.2f})")
+                if all(pos["tp_hit"]):
+                    pnl = pos["realized"]
+                    if pnl >= 0:
+                        p["wins"] += 1
+                    else:
+                        p["losses"] += 1
+                    closed.append(pid)
+                    alerts.send(alerts.paper_closed_msg(
+                        pos["name"], pnl,
+                        pnl / pos["invested"] * 100 if pos["invested"] else 0,
+                        "اكتملت الأهداف 🎯", p["cash"]), dry_run)
+                break
+        if pid in closed:
+            continue
+        # وقف الخسارة: بيع كل الكمية المتبقية
+        if price <= entry * (1 - STOP_LOSS):
+            proceeds = pos["qty"] * price
+            pnl = proceeds - pos["qty"] * entry + pos["realized"]
+            p["cash"] += proceeds
+            p["losses"] += 1
+            closed.append(pid)
+            print(f"  -> وهمي: وقف خسارة {pos['name']} (${pnl:+.2f})")
+            alerts.send(alerts.paper_closed_msg(
+                pos["name"], pnl,
+                pnl / pos["invested"] * 100 if pos["invested"] else 0,
+                "وقف الخسارة 🛑", p["cash"]), dry_run)
+            continue
+        # انتهاء مدة المتابعة: بيع بسعر السوق
+        if time.time() - pos["entry_time"] > POSITION_MAX_AGE_DAYS * 86400:
+            proceeds = pos["qty"] * price
+            pnl = proceeds - pos["qty"] * entry + pos["realized"]
+            p["cash"] += proceeds
+            if pnl >= 0:
+                p["wins"] += 1
+            else:
+                p["losses"] += 1
+            closed.append(pid)
+    for pid in closed:
+        p["positions"].pop(pid, None)
+
+
+def paper_summary(s):
+    """ملخص المحفظة الافتراضية للملخص اليومي."""
+    p = s["paper"]
+    invested = 0.0
+    for pos in p["positions"].values():
+        price, _liq = current_price(pos)
+        invested += (pos["qty"] * (price or pos["entry"]))
+    total = p["cash"] + invested
+    pnl = total - p["start"]
+    pct = pnl / p["start"] * 100 if p["start"] else 0
+    n_closed = p["wins"] + p["losses"]
+    winrate = p["wins"] / n_closed * 100 if n_closed else 0
+    return {
+        "total": total, "cash": p["cash"], "pnl": pnl, "pct": pct,
+        "open": len(p["positions"]), "closed": n_closed,
+        "wins": p["wins"], "winrate": winrate,
+    }
 
 
 def current_price(pos):
@@ -404,6 +525,7 @@ def maybe_digest(s, dry_run, movers, ctx):
         "track": st.track_summary(s),
         "fng": ctx.get("fng"),
         "news_stats": ctx.get("news_stats") or {},
+        "paper": paper_summary(s) if PAPER_ENABLED else None,
     }
     date_str = now.strftime("%Y-%m-%d")
     print("=== إرسال الملخص اليومي ===")
@@ -428,6 +550,7 @@ def main():
     check_waitlist(s, a.dry_run, ctx)
     update_positions(s, a.dry_run)
     movers = scan_watchlist(s, a.dry_run, ctx)
+    update_paper(s, a.dry_run)
     maybe_digest(s, a.dry_run, movers, ctx)
 
     if not a.dry_run:

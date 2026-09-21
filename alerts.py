@@ -135,6 +135,18 @@ def stop_loss_msg(name, entry, price):
     )
 
 
+def paper_closed_msg(name, pnl_usd, pnl_pct, reason, cash):
+    """نتيجة إغلاق صفقة وهمية — تُرسل مرة واحدة عند الإغلاق فقط."""
+    icon = "🟢" if pnl_usd >= 0 else "🔴"
+    return (
+        f"💼 <b>المحفظة الافتراضية: أُغلقت صفقة {html.escape(name)}</b>\n"
+        f"السبب: {reason}\n"
+        f"{icon} النتيجة: {pnl_usd:+.2f}$ ({pnl_pct:+.1f}%)\n"
+        f"💰 الرصيد النقدي الآن: ${cash:.2f}\n"
+        f"<i>تجربة وهمية — ليست أموالاً حقيقية.</i>"
+    )
+
+
 def rug_warn_msg(name, price):
     return (
         f"🚨 <b>خطر! {html.escape(name)}</b>\n"
@@ -221,6 +233,19 @@ def digest_msg(date_str, positions, new_signals, movers, ctx):
     if trending:
         names = ", ".join(t["symbol"] for t in trending[:5])
         lines.append(f"\n👀 <b>رائج الآن:</b> {html.escape(names)}")
+
+    paper = (ctx or {}).get("paper")
+    if paper:
+        icon = "🟢" if paper["pnl"] >= 0 else "🔴"
+        lines.append(
+            f"\n💼 <b>المحفظة الافتراضية (تجربة):</b>\n"
+            f"بدأنا بـ $100 ← القيمة الآن: <b>${paper['total']:.2f}</b> "
+            f"(نقد: ${paper['cash']:.2f})\n"
+            f"{icon} الربح/الخسارة: {paper['pnl']:+.2f}$ ({paper['pct']:+.1f}%)\n"
+            f"🏆 الصفقات المغلقة: {paper['closed']} "
+            f"(رابحة: {paper['wins']} • نسبة الفوز: {paper['winrate']:.0f}%)\n"
+            f"📌 صفقات وهمية مفتوحة: {paper['open']}"
+        )
 
     news = (ctx or {}).get("news_top") or []
     if news:
