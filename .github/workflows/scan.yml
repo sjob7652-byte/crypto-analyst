@@ -1,13 +1,14 @@
 name: Memecoin Scanner
 
-# يعمل تلقائياً كل 30 دقيقة + زر تشغيل يدوي للتجربة
+# يعمل تلقائياً كل 5 دقائق + زر تشغيل يدوي للتجربة
+# (المستودع عام = دقائق Actions غير محدودة مجاناً)
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   scan:
@@ -15,6 +16,14 @@ jobs:
     steps:
       - name: جلب الكود
         uses: actions/checkout@v4
+
+      - name: استعادة حالة البوت (cache مجاني — بلا آلاف الـcommits)
+        uses: actions/cache/restore@v4
+        with:
+          path: state.json
+          key: bot-state-${{ github.run_id }}
+          restore-keys: |
+            bot-state-
 
       - name: تثبيت Python
         uses: actions/setup-python@v5
@@ -30,9 +39,8 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
-      - name: حفظ الحالة (الصفقات المفتوحة)
-        run: |
-          git config user.name "crypto-bot"
-          git config user.email "crypto-bot@users.noreply.github.com"
-          git add state.json
-          git diff --staged --quiet || (git commit -m "update state" && git push)
+      - name: حفظ الحالة في الـcache للجولة القادمة
+        uses: actions/cache/save@v4
+        with:
+          path: state.json
+          key: bot-state-${{ github.run_id }}
