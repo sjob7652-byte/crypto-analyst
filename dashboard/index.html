@@ -6,69 +6,133 @@
 <title>محفظة الميم كوينز الوهمية — لوحة المراقبة</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
 <style>
-  body { background:#0b0e14; }
-  .card { background:#131722; border:1px solid #1f2633; border-radius:1rem; }
-  .pos { color:#22c55e; } .neg { color:#ef4444; }
-  .flash { animation: flash 1s; }
-  @keyframes flash { 0%{background:#1e293b} 100%{background:transparent} }
-  #t-body tr { scroll-margin-top: 90px; }
-  #t-body tr:target { background: rgba(59,130,246,.18); }
+  body {
+    background: #070b14;
+    background-image:
+      radial-gradient(600px 300px at 85% -5%, rgba(34,197,94,.08), transparent),
+      radial-gradient(700px 350px at 10% 0%, rgba(59,130,246,.10), transparent),
+      radial-gradient(500px 400px at 50% 110%, rgba(168,85,247,.06), transparent);
+    min-height: 100vh;
+  }
+  .glass {
+    background: rgba(19,23,34,.62);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255,255,255,.07);
+    border-radius: 1.25rem;
+    box-shadow: 0 8px 32px rgba(0,0,0,.35);
+  }
+  .hero-num {
+    background: linear-gradient(135deg, #fff 30%, #a7f3d0 70%, #34d399);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .hero-num.neg {
+    background: linear-gradient(135deg, #fff 30%, #fca5a5 70%, #f87171);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .pos { color: #4ade80; text-shadow: 0 0 18px rgba(74,222,128,.35); }
+  .neg { color: #f87171; text-shadow: 0 0 18px rgba(248,113,113,.30); }
+  .pulse-dot { position: relative; width: 10px; height: 10px; border-radius: 9999px; background: #4ade80; }
+  .pulse-dot::after {
+    content: ""; position: absolute; inset: -4px; border-radius: 9999px;
+    background: rgba(74,222,128,.4); animation: ping 1.6s cubic-bezier(0,0,.2,1) infinite;
+  }
+  @keyframes ping { 75%, 100% { transform: scale(2); opacity: 0; } }
+  .skel {
+    background: linear-gradient(90deg, rgba(255,255,255,.04) 25%, rgba(255,255,255,.09) 50%, rgba(255,255,255,.04) 75%);
+    background-size: 200% 100%; animation: shimmer 1.4s infinite; border-radius: 1.25rem;
+  }
+  @keyframes shimmer { to { background-position: -200% 0; } }
+  .trade-card { scroll-margin-top: 90px; transition: transform .18s ease, box-shadow .18s ease; }
+  .trade-card:hover { transform: translateY(-3px); box-shadow: 0 12px 40px rgba(0,0,0,.5); }
+  .trade-card:target { border-color: rgba(59,130,246,.65); box-shadow: 0 0 0 2px rgba(59,130,246,.45), 0 12px 40px rgba(0,0,0,.5); }
+  .flash { animation: flash 1.2s; }
+  @keyframes flash { 0% { background: rgba(59,130,246,.18); } 100% { background: transparent; } }
+  .chip { font-size: .68rem; padding: .15rem .55rem; border-radius: 9999px; background: rgba(255,255,255,.07); }
+  .btn-chart {
+    display: inline-flex; align-items: center; gap: .35rem;
+    background: linear-gradient(135deg, #2563eb, #7c3aed);
+    border-radius: .75rem; padding: .45rem .9rem; font-size: .8rem; font-weight: 700;
+    transition: filter .15s;
+  }
+  .btn-chart:hover { filter: brightness(1.2); }
+  .stat-ic { width: 34px; height: 34px; border-radius: .8rem; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,.06); }
+  .stat-ic svg { width: 18px; height: 18px; }
 </style>
 </head>
 <body class="text-slate-200 min-h-screen">
-<div class="max-w-5xl mx-auto p-4 pb-16">
+<div class="max-w-6xl mx-auto p-4 pb-16">
 
   <header class="flex items-center justify-between py-4">
-    <div>
-      <h1 class="text-2xl font-bold">🤖 لوحة مراقبة المحفظة الوهمية</h1>
-      <p class="text-sm text-slate-400">تحديث تلقائي كل دقيقة — البيانات من Gist السري</p>
+    <div class="flex items-center gap-3">
+      <div class="stat-ic" style="background:linear-gradient(135deg,#2563eb,#7c3aed)"><i data-lucide="bot" class="text-white"></i></div>
+      <div>
+        <h1 class="text-xl font-extrabold">لوحة المحفظة الوهمية</h1>
+        <div class="flex items-center gap-2 text-xs text-slate-400">
+          <span class="pulse-dot"></span><span>مباشر</span>
+          <span id="sync-hint" class="text-slate-500">—</span>
+        </div>
+      </div>
     </div>
-    <button id="refresh" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm">🔄 تحديث</button>
+    <button id="refresh" class="glass px-4 py-2 text-sm font-bold flex items-center gap-2 hover:bg-white/10">
+      <i data-lucide="refresh-cw" class="w-4 h-4"></i> تحديث
+    </button>
   </header>
 
-  <div id="setup" class="card p-6 hidden">
+  <div id="setup" class="glass p-6 hidden">
     <h2 class="text-lg font-bold mb-2">⚙️ الإعداد (مرة واحدة)</h2>
     <p class="text-sm text-slate-400 leading-7">
-      أضف معرف الـ Gist السري في رابط الصفحة:
-      <code class="bg-slate-800 px-2 py-1 rounded" dir="ltr">?gist=YOUR_GIST_ID</code><br>
-      مثال: <code class="bg-slate-800 px-2 py-1 rounded" dir="ltr">index.html?gist=abc123...</code>
+      افتح اللوحة مع معرف الـGist السري في الرابط:<br>
+      <code class="text-emerald-300" dir="ltr">?gist=YOUR_GIST_ID</code>
     </p>
   </div>
 
   <div id="dash" class="hidden">
-    <!-- البطاقات -->
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-      <div class="card p-4"><div class="text-xs text-slate-400">الرصيد النقدي</div><div id="c-cash" class="text-xl font-bold">$—</div></div>
-      <div class="card p-4"><div class="text-xs text-slate-400">القيمة الإجمالية (حية)</div><div id="c-equity" class="text-xl font-bold">$—</div></div>
-      <div class="card p-4"><div class="text-xs text-slate-400">صفقات مفتوحة</div><div id="c-open" class="text-xl font-bold">—</div></div>
-      <div class="card p-4"><div class="text-xs text-slate-400">نسبة فوز المحفظة</div><div id="c-win" class="text-xl font-bold">—</div></div>
-    </div>
+    <!-- البطل: القيمة الإجمالية -->
+    <section class="glass p-6 mb-5 text-center relative overflow-hidden">
+      <div class="text-xs text-slate-400 mb-1 flex items-center justify-center gap-2">
+        <i data-lucide="wallet" class="w-4 h-4"></i> القيمة الإجمالية للمحفظة (حية)
+      </div>
+      <div id="h-equity" class="hero-num text-5xl font-black tracking-tight" dir="ltr">$—</div>
+      <div id="h-pnl" class="mt-2 text-sm font-bold">—</div>
+      <div class="grid grid-cols-3 gap-3 mt-5 text-center">
+        <div><div class="text-[11px] text-slate-500">الرصيد النقدي</div><div id="h-cash" class="font-extrabold" dir="ltr">$—</div></div>
+        <div><div class="text-[11px] text-slate-500">صفقات مفتوحة</div><div id="h-open" class="font-extrabold">—</div></div>
+        <div><div class="text-[11px] text-slate-500">آخر مزامنة</div><div id="h-time" class="font-extrabold text-sm">—</div></div>
+      </div>
+    </section>
 
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-      <div class="card p-4"><div class="text-xs text-slate-400">إشارات مرسلة</div><div id="c-sig" class="text-xl font-bold">—</div></div>
-      <div class="card p-4"><div class="text-xs text-slate-400">ذاكرة الخبير: نجاح</div><div id="c-hit" class="text-xl font-bold">—</div></div>
-      <div class="card p-4"><div class="text-xs text-slate-400">إشارات متابعة</div><div id="c-pos" class="text-xl font-bold">—</div></div>
-      <div class="card p-4"><div class="text-xs text-slate-400">آخر تحديث</div><div id="c-time" class="text-xl font-bold text-sm">—</div></div>
-    </div>
+    <!-- مؤشرات فرعية -->
+    <section class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
+      <div class="glass p-3 flex items-center gap-3"><div class="stat-ic"><i data-lucide="target" class="text-emerald-400"></i></div><div><div class="text-[11px] text-slate-500">فوز المحفظة</div><div id="s-win" class="font-extrabold text-sm">—</div></div></div>
+      <div class="glass p-3 flex items-center gap-3"><div class="stat-ic"><i data-lucide="brain" class="text-violet-400"></i></div><div><div class="text-[11px] text-slate-500">ذاكرة الخبير</div><div id="s-hit" class="font-extrabold text-sm">—</div></div></div>
+      <div class="glass p-3 flex items-center gap-3"><div class="stat-ic"><i data-lucide="bomb" class="text-red-400"></i></div><div><div class="text-[11px] text-slate-500">سحب سيولة</div><div id="s-rug" class="font-extrabold text-sm">—</div></div></div>
+      <div class="glass p-3 flex items-center gap-3"><div class="stat-ic"><i data-lucide="shield-off" class="text-orange-400"></i></div><div><div class="text-[11px] text-slate-500">قائمة سوداء</div><div id="s-bl" class="font-extrabold text-sm">—</div></div></div>
+      <div class="glass p-3 flex items-center gap-3"><div class="stat-ic"><i data-lucide="bell-ring" class="text-sky-400"></i></div><div><div class="text-[11px] text-slate-500">إشارات مرسلة</div><div id="s-sig" class="font-extrabold text-sm">—</div></div></div>
+      <div class="glass p-3 flex items-center gap-3"><div class="stat-ic"><i data-lucide="radar" class="text-amber-400"></i></div><div><div class="text-[11px] text-slate-500">إشارات متابعة</div><div id="s-pos" class="font-extrabold text-sm">—</div></div></div>
+    </section>
 
-    <!-- الصفقات -->
-    <h2 class="text-lg font-bold mb-2">💼 الصفقات الوهمية المفتوحة</h2>
-    <div class="card overflow-hidden mb-6">
-      <table class="w-full text-sm">
-        <thead><tr class="text-slate-400 border-b border-slate-800">
-          <th class="p-3 text-right">العملة</th><th class="p-3">الدخول</th>
-          <th class="p-3">السعر الحي</th><th class="p-3">الربح/الخسارة</th><th class="p-3">المستثمر</th>
-        </tr></thead>
-        <tbody id="t-body"><tr><td colspan="5" class="p-4 text-center text-slate-500">—</td></tr></tbody>
-      </table>
-    </div>
+    <!-- الصفقات المفتوحة -->
+    <section class="mb-5">
+      <h2 class="font-extrabold mb-3 flex items-center gap-2"><i data-lucide="layers" class="w-5 h-5 text-emerald-400"></i> الصفقات المفتوحة <span id="t-count" class="chip"></span></h2>
+      <div id="t-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div class="skel h-44"></div><div class="skel h-44"></div><div class="skel h-44"></div>
+      </div>
+    </section>
 
-    <!-- الرسم البياني -->
-    <h2 class="text-lg font-bold mb-2">🧠 نسبة نجاح "ذاكرة الخبير" عبر الزمن</h2>
-    <div class="card p-4 mb-6"><canvas id="chart" height="120"></canvas>
-      <p class="text-xs text-slate-500 mt-2">نسبة الإشارات التي وصلت لهدف واحد على الأقل — مجمعة يومياً (آخر 14 يوم)</p>
-    </div>
+    <!-- ذاكرة الخبير -->
+    <section class="mb-5">
+      <h2 class="font-extrabold mb-3 flex items-center gap-2"><i data-lucide="line-chart" class="w-5 h-5 text-violet-400"></i> ذاكرة الخبير عبر الزمن</h2>
+      <div class="glass p-4"><canvas id="chart" height="110"></canvas>
+        <p class="text-xs text-slate-500 mt-2">نسبة الإشارات التي وصلت لهدف واحد على الأقل — مجمعة يومياً (آخر 14 يوم)</p>
+      </div>
+    </section>
 
     <p class="text-xs text-slate-500 text-center">⚠️ المحفظة وهمية 100% للتجربة — نسبة النجاح تقديرية وليست ضماناً للربح</p>
   </div>
@@ -82,11 +146,33 @@ const GIST_ID = qp.get("gist") || GIST_ID_DEFAULT;
 
 const $ = id => document.getElementById(id);
 const fmt$ = v => "$" + Number(v).toFixed(2);
+const slug = id => String(id || "").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 let chart = null;
+
+const FALLBACK_COIN = "data:image/svg+xml," + encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="#1f2633"/><text x="24" y="30" font-size="20" text-anchor="middle" fill="#64748b">◉</text></svg>`);
+
+function logoFor(t) {
+  if (t.kind === "dex" && t.mint && t.chain)
+    return `https://dd.dexscreener.com/ds-data/tokens/${t.chain}/${t.mint}.png`;
+  if (t.kind === "binance" && t.symbol) {
+    const base = t.symbol.replace(/USDT$/, "").toLowerCase();
+    return `https://assets.coincap.io/assets/icons/${base}@2x.png`;
+  }
+  return FALLBACK_COIN;
+}
+
+function chartUrl(t) {
+  if (t.kind === "dex" && t.chain && t.pair)
+    return `https://dexscreener.com/${t.chain}/${t.pair}`;
+  if (t.kind === "binance" && t.symbol)
+    return `https://www.binance.com/en/trade/${t.symbol.replace("USDT", "")}_USDT`;
+  return null;
+}
 
 async function dexPrice(chain, pair) {
   try {
-    const r = await fetch(`https://api.dexscreener.com/latest/dex/pairs/${chain}/${pair}`);
+    const r = await fetch(`https://api.dexscreener.com/latest/dex/pairs/${chain}/${pair}`, {cache: "no-store"});
     const j = await r.json();
     const p = (j.pairs || [])[0];
     return p ? parseFloat(p.priceUsd) : null;
@@ -96,17 +182,20 @@ async function dexPrice(chain, pair) {
 async function load() {
   if (!GIST_ID) { $("setup").classList.remove("hidden"); return; }
   $("setup").classList.add("hidden");
+  $("sync-hint").textContent = "جارٍ الجلب…";
   try {
-    const r = await fetch(`https://api.github.com/gists/${GIST_ID}`);
+    // no-store: تجاوز كاش المتصفح — أحدث نسخة من الـGist مباشرة
+    const r = await fetch(`https://api.github.com/gists/${GIST_ID}`, {cache: "no-store"});
     if (!r.ok) throw new Error("gist " + r.status);
     const g = await r.json();
     const file = g.files["state.json"];
     if (!file) throw new Error("no state.json");
-    const s = JSON.parse(file.content);
-    render(s);
+    await render(JSON.parse(file.content));
+    $("sync-hint").textContent = "تم قبل لحظات";
   } catch (e) {
     $("dash").classList.remove("hidden");
-    $("t-body").innerHTML = `<tr><td colspan="5" class="p-4 text-center neg">تعذّر قراءة الحالة: ${e.message}</td></tr>`;
+    $("t-grid").innerHTML = `<div class="glass p-6 text-center neg col-span-full">تعذّر قراءة الحالة: ${e.message}</div>`;
+    $("sync-hint").textContent = "فشل الجلب";
   }
 }
 
@@ -116,66 +205,95 @@ async function render(s) {
   const pos = p.positions || {};
   const ids = Object.keys(pos);
 
-  $("c-cash").textContent = fmt$(p.cash || 0);
-  $("c-open").textContent = ids.length;
-  const tr = (p.trades || 0);
-  $("c-win").textContent = tr ? Math.round(100 * (p.wins || 0) / tr) + "% (" + tr + ")" : "—";
-  $("c-sig").textContent = Object.keys(s.alerted || {}).length;
-  $("c-pos").textContent = Object.keys(s.positions || {}).length;
-  $("c-time").textContent = new Date().toLocaleTimeString("ar-MA", {hour:"2-digit",minute:"2-digit"});
-
-  // ذاكرة الخبير
-  const hist = s.history || [];
-  const wins = hist.filter(h => ["tp1","tp2","tp3"].includes(h.outcome)).length;
-  $("c-hit").textContent = hist.length ? Math.round(100 * wins / hist.length) + "% (" + hist.length + ")" : "—";
-
-  // الصفقات بأسعار حية
-  const slug = id => String(id || "").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  let equity = p.cash || 0, rows = "";
+  // البطل
+  let equity = p.cash || 0;
+  const cards = [];
   for (const id of ids) {
     const t = pos[id];
     const live = (t.chain && t.pair) ? await dexPrice(t.chain, t.pair) : null;
     const px = live || t.entry;
-    const pnl = (px - t.entry) / t.entry * 100;
-    const val = (t.qty || 0) * px;
-    equity += val;
-    const cls = pnl >= 0 ? "pos" : "neg";
-    rows += `<tr id="trade-${slug(id)}" class="border-b border-slate-800 flash">
-      <td class="p-3 font-bold">${t.name || id}</td>
-      <td class="p-3" dir="ltr">${Number(t.entry).toPrecision(4)}</td>
-      <td class="p-3 ${cls}" dir="ltr">${live ? Number(live).toPrecision(4) : "—"}</td>
-      <td class="p-3 font-bold ${cls}" dir="ltr">${pnl >= 0 ? "+" : ""}${pnl.toFixed(1)}%</td>
-      <td class="p-3" dir="ltr">${fmt$(t.invested || 0)}</td></tr>`;
+    equity += (t.qty || 0) * px;
+    cards.push({id, t, live, px});
   }
-  $("t-body").innerHTML = rows || `<tr><td colspan="5" class="p-4 text-center text-slate-500">لا توجد صفقات مفتوحة</td></tr>`;
-  const eqEl = $("c-equity");
+  const start = p.start || 100;
+  const pnl = equity - start, pnlPct = start ? pnl / start * 100 : 0;
+  const eqEl = $("h-equity");
   eqEl.textContent = fmt$(equity);
-  eqEl.className = "text-xl font-bold " + (equity >= (p.start || 100) ? "pos" : "neg");
+  eqEl.classList.toggle("neg", pnl < 0);
+  const pnlEl = $("h-pnl");
+  pnlEl.innerHTML = `<span class="${pnl >= 0 ? "pos" : "neg"}">${pnl >= 0 ? "+" : ""}${fmt$(pnl)} (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(1)}%)</span>`;
+  $("h-cash").textContent = fmt$(p.cash || 0);
+  $("h-open").textContent = ids.length;
+  $("h-time").textContent = new Date().toLocaleTimeString("ar-MA", {hour: "2-digit", minute: "2-digit"});
+
+  // مؤشرات
+  const tr = p.trades || 0;
+  $("s-win").textContent = tr ? Math.round(100 * (p.wins || 0) / tr) + "%" : "—";
+  const hist = s.history || [];
+  const wins = hist.filter(h => ["tp1", "tp2", "tp3"].includes(h.outcome)).length;
+  $("s-hit").textContent = hist.length ? Math.round(100 * wins / hist.length) + "%" : "—";
+  $("s-rug").textContent = hist.filter(h => h.outcome === "rug").length || "0";
+  $("s-bl").textContent = Object.keys(s.rug_blacklist || {}).length || "0";
+  $("s-sig").textContent = Object.keys(s.alerted || {}).length;
+  $("s-pos").textContent = Object.keys(s.positions || {}).length;
+
+  // بطاقات الصفقات
+  $("t-count").textContent = ids.length ? ids.length + " مفتوحة" : "";
+  if (!cards.length) {
+    $("t-grid").innerHTML = `<div class="glass p-8 text-center text-slate-500 col-span-full">لا توجد صفقات مفتوحة حالياً</div>`;
+  } else {
+    cards.sort((a, b) => ((b.px - b.t.entry) / b.t.entry) - ((a.px - a.t.entry) / a.t.entry));
+    $("t-grid").innerHTML = cards.map(({id, t, live, px}) => {
+      const pnlT = (px - t.entry) / t.entry * 100;
+      const cls = pnlT >= 0 ? "pos" : "neg";
+      const cu = chartUrl(t);
+      const kindChip = t.kind === "binance"
+        ? `<span class="chip">Binance</span>`
+        : `<span class="chip">DEX · ${t.chain || ""}</span>`;
+      return `<div id="trade-${slug(id)}" class="trade-card glass flash p-4">
+        <div class="flex items-center gap-3 mb-3">
+          <img src="${logoFor(t)}" alt="" class="w-11 h-11 rounded-full bg-white/5"
+               onerror="this.onerror=null;this.src='${FALLBACK_COIN}'">
+          <div class="flex-1 min-w-0">
+            <div class="font-extrabold truncate">${t.name || id}</div>
+            <div class="flex gap-1 mt-1">${kindChip}</div>
+          </div>
+        </div>
+        <div class="text-3xl font-black ${cls} mb-2" dir="ltr">${pnlT >= 0 ? "+" : ""}${pnlT.toFixed(1)}%</div>
+        <div class="text-xs text-slate-400 space-y-1 mb-3" dir="ltr">
+          <div class="flex justify-between"><span>Entry</span><span class="text-slate-200">${Number(t.entry).toPrecision(4)}</span></div>
+          <div class="flex justify-between"><span>Live</span><span class="text-slate-200">${live ? Number(live).toPrecision(4) : "—"}</span></div>
+          <div class="flex justify-between"><span>Invested</span><span class="text-slate-200">${fmt$(t.invested || 0)}</span></div>
+        </div>
+        ${cu ? `<a class="btn-chart text-white" target="_blank" rel="noopener" href="${cu}"><i data-lucide="candlestick-chart" class="w-4 h-4"></i> الشارت</a>` : ""}
+      </div>`;
+    }).join("");
+  }
 
   // الرسم البياني: نجاح يومي
   const days = {};
   for (const h of hist) {
     const d = new Date(h.time * 1000).toISOString().slice(0, 10);
-    (days[d] = days[d] || {n:0, w:0});
+    days[d] = days[d] || {w: 0, n: 0};
     days[d].n++;
-    if (["tp1","tp2","tp3"].includes(h.outcome)) days[d].w++;
+    if (["tp1", "tp2", "tp3"].includes(h.outcome)) days[d].w++;
   }
   const labels = Object.keys(days).sort().slice(-14);
   const data = labels.map(d => Math.round(100 * days[d].w / days[d].n));
   if (chart) chart.destroy();
   chart = new Chart($("chart"), {
     type: "line",
-    data: { labels, datasets: [{ label: "نسبة النجاح %", data,
-      borderColor: "#22c55e", backgroundColor: "rgba(34,197,94,.15)", fill: true, tension: .3 }]},
-    options: { plugins: { legend: { labels: { color: "#94a3b8" } } },
-      scales: { y: { min: 0, max: 100, ticks: { color: "#64748b" }, grid: { color: "#1e293b" } },
-                x: { ticks: { color: "#64748b" }, grid: { display: false } } } }
+    data: {labels, datasets: [{data, borderColor: "#4ade80", backgroundColor: "rgba(74,222,128,.12)", fill: true, tension: .35, pointRadius: 3}]},
+    options: {plugins: {legend: {display: false}}, scales: {y: {min: 0, max: 100, ticks: {color: "#64748b"}}, x: {ticks: {color: "#64748b", maxTicksLimit: 7}}}}
   });
+
+  if (window.lucide) lucide.createIcons();
 }
 
 $("refresh").onclick = load;
-load();
 setInterval(load, 60000);
+load();
+if (window.lucide) lucide.createIcons();
 </script>
 </body>
 </html>
