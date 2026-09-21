@@ -154,6 +154,19 @@
       </div>
     </section>
 
+    <!-- سجل الصفقات المغلقة (الأرشيف التاريخي) -->
+    <section class="mb-5">
+      <h2 class="font-extrabold mb-3 flex items-center gap-2"><i data-lucide="archive" class="w-5 h-5 text-sky-400"></i> سجل الصفقات المغلقة <span id="c-count" class="chip"></span></h2>
+      <div class="glass p-4 mb-3 grid grid-cols-3 gap-3 text-center">
+        <div><div class="text-[11px] text-slate-500 mb-1">إجمالي الربح / الخسارة</div><div id="c-pnl" class="font-black text-xl" dir="ltr">—</div></div>
+        <div><div class="text-[11px] text-slate-500 mb-1">نسبة النجاح</div><div id="c-win" class="font-extrabold text-xl">—</div></div>
+        <div><div class="text-[11px] text-slate-500 mb-1">صفقات مغلقة</div><div id="c-n" class="font-extrabold text-xl">—</div></div>
+      </div>
+      <div id="c-list" class="space-y-2">
+        <div class="skel h-16"></div>
+      </div>
+    </section>
+
     <!-- ذاكرة الخبير -->
     <section class="mb-5">
       <h2 class="font-extrabold mb-3 flex items-center gap-2"><i data-lucide="line-chart" class="w-5 h-5 text-violet-400"></i> ذاكرة الخبير عبر الزمن</h2>
@@ -384,7 +397,61 @@ async function render(s) {
     options: {plugins: {legend: {display: false}}, scales: {y: {min: 0, max: 100, ticks: {color: "#64748b"}}, x: {ticks: {color: "#64748b", maxTicksLimit: 7}}}}
   });
 
+  // سجل الصفقات المغلقة (الأرشيف التاريخي)
+  renderClosed(p.closed_trades || []);
+
   if (window.lucide) lucide.createIcons();
+}
+
+const REASON_LABEL = {
+  TP: "🎯 اكتمال الأهداف",
+  SL: "🛑 وقف الخسارة",
+  RUG: "🚨 انهيار (Rug)",
+  EXPIRED: "⏰ انتهاء المدة",
+};
+
+function fmtDate(ts) {
+  if (!ts) return "—";
+  return new Date(ts * 1000).toLocaleString("ar-MA", {day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"});
+}
+
+function renderClosed(arch) {
+  $("c-count").textContent = arch.length ? arch.length + " صفقة" : "";
+  if (!arch.length) {
+    $("c-pnl").textContent = "—"; $("c-win").textContent = "—"; $("c-n").textContent = "0";
+    $("c-list").innerHTML = `<div class="glass p-6 text-center text-slate-500">لا توجد صفقات مغلقة بعد — الأرشيف يبدأ من هذا التحديث</div>`;
+    return;
+  }
+  const total = arch.reduce((a, t) => a + (t.pnl || 0), 0);
+  const wins = arch.filter(t => (t.pnl || 0) > 0).length;
+  const wr = Math.round(100 * wins / arch.length);
+  const pnlEl = $("c-pnl");
+  pnlEl.textContent = `${total >= 0 ? "+" : ""}$${total.toFixed(2)}`;
+  pnlEl.className = "font-black text-xl " + (total >= 0 ? "pos" : "neg");
+  const winEl = $("c-win");
+  winEl.textContent = wr + "%";
+  winEl.className = "font-extrabold text-xl " + (wr >= 50 ? "pos" : "neg");
+  $("c-n").textContent = arch.length;
+  const rows = [...arch].reverse().map(t => {
+    const pnl = t.pnl || 0, cls = pnl >= 0 ? "pos" : "neg";
+    const reason = REASON_LABEL[t.reason] || t.reason || "—";
+    return `<div class="glass p-3 flex items-center gap-3">
+      <div class="flex-1 min-w-0">
+        <div class="font-extrabold truncate">${t.name || "—"}</div>
+        <div class="text-[11px] text-slate-500">${reason} · ${fmtDate(t.close_time)}</div>
+      </div>
+      <div class="text-right text-xs text-slate-400" dir="ltr">
+        <div>Entry ${Number(t.entry).toPrecision(4)}</div>
+        <div>Exit ${Number(t.exit).toPrecision(4)}</div>
+        <div>Inv $${Number(t.invested || 0).toFixed(2)}</div>
+      </div>
+      <div class="text-right shrink-0" dir="ltr">
+        <div class="font-black text-lg ${cls}">${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}</div>
+        <div class="text-xs font-bold ${cls}">${(t.pnl_pct || 0) >= 0 ? "+" : ""}${Number(t.pnl_pct || 0).toFixed(1)}%</div>
+      </div>
+    </div>`;
+  }).join("");
+  $("c-list").innerHTML = rows;
 }
 
 $("refresh").onclick = load;
