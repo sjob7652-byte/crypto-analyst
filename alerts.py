@@ -148,9 +148,26 @@ def digest_msg(date_str, positions, new_signals, movers, ctx):
     lines = [f"📰 <b>ملخص اليوم — {date_str}</b>"]
 
     macro = (ctx or {}).get("macro")
-    if macro:
+    if macro and macro.get("btc_chg") is not None:
         icon = "📈" if macro["btc_chg"] >= 0 else "📉"
-        lines.append(f"\n{icon} <b>البيتكوين:</b> {fmt_usd(macro['btc'])} ({macro['btc_chg']:+.1f}% في 24س)")
+        check = " ✓" if macro.get("verified") else ""
+        btc_price = fmt_usd(macro["btc"]) if macro.get("btc") else "—"
+        lines.append(f"\n{icon} <b>البيتكوين:</b> {btc_price} ({macro['btc_chg']:+.1f}% في 24س){check}")
+
+    fng = (ctx or {}).get("fng")
+    if fng and fng.get("value") is not None:
+        v = fng["value"]
+        icon = "😨" if v <= 25 else ("😡" if v > 75 else "😐")
+        lines.append(f"{icon} <b>الخوف والطمع:</b> {v}/100 ({html.escape(str(fng.get('label', '')))})")
+
+    ns = (ctx or {}).get("news_stats") or {}
+    if ns.get("sources_ok"):
+        q = f"📊 <b>جودة البيانات:</b> {ns['sources_ok']} مصادر موثوقة"
+        if ns.get("dupes_merged"):
+            q += f" • {ns['dupes_merged']} خبر مكرر مُزال"
+        if macro and macro.get("verified"):
+            q += " • BTC مُتحقق من مصدرين"
+        lines.append("\n" + q)
 
     if positions:
         lines.append("\n📌 <b>صفقاتك المفتوحة:</b>")

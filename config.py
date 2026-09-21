@@ -7,9 +7,10 @@ CHAINS = ["bsc", "solana", "base", "ethereum"]
 # عدد العملات الجديدة المفحوصة في كل دورة
 SCAN_LIMIT = 20
 
-# عتبات التصفية الأولية للعملات الجديدة
-MIN_LIQUIDITY_USD = 10_000
-MIN_VOLUME_24H_USD = 5_000
+# عتبات التصفية الأولية للعملات الجديدة (تنقية البيانات: حدود أعلى = ضجيج أقل)
+MIN_LIQUIDITY_USD = 20_000
+MIN_VOLUME_24H_USD = 10_000
+MIN_TXNS_24H = 50        # حد أدنى لعدد صفقات آخر 24 ساعة
 MAX_PAIR_AGE_DAYS = 30
 
 # عتبات الإشارة (من 100)
@@ -43,16 +44,35 @@ USE_COINGECKO = True
 COINGECKO_API = "https://api.coingecko.com/api/v3"  # مجاني بدون مفتاح
 
 USE_NEWS = True
+# ---------- تنقية البيانات: مصادر موثوقة بطبقات ثقة ----------
+# الطبقة 1: إعلام مالي عالمي (الأعلى ثقة) — الطبقة 2: إعلام كريبتو متخصص معروف
+# الطبقة 3: إعلام كريبتو عام (يُستخدم للمزاج العام فقط، لا لإشارات العملات)
+TIER_WEIGHTS = {1: 3.0, 2: 2.0, 3: 1.0}
 NEWS_FEEDS = [
-    ("CoinDesk", "https://www.coindesk.com/arc/outboundfeeds/rss/"),
-    ("CoinTelegraph", "https://cointelegraph.com/rss"),
-    ("Decrypt", "https://decrypt.co/feed"),
-    ("The Block", "https://www.theblock.co/rss.xml"),
-    ("Bitcoin Magazine", "https://bitcoinmagazine.com/.rss/full/"),
-    ("CoinJournal", "https://coinjournal.net/rss/"),
+    # الطبقة 1: صحافة مالية عالمية موثوقة ومشهورة
+    ("Bloomberg", "https://feeds.bloomberg.com/markets/news.rss", 1),
+    ("CNBC", "https://www.cnbc.com/id/10000664/device/rss/rss.html", 1),
+    # الطبقة 2: إعلام كريبتو متخصص ومعروف
+    ("CoinDesk", "https://www.coindesk.com/arc/outboundfeeds/rss/", 2),
+    ("CoinTelegraph", "https://cointelegraph.com/rss", 2),
+    ("The Block", "https://www.theblock.co/rss.xml", 2),
+    ("Decrypt", "https://decrypt.co/feed", 2),
+    ("CryptoSlate", "https://cryptoslate.com/feed/", 2),
+    # الطبقة 3: مصادر كريبتو عامة
+    ("Bitcoin Magazine", "https://bitcoinmagazine.com/.rss/full/", 3),
+    ("CoinJournal", "https://coinjournal.net/rss/", 3),
+    ("Investing.com", "https://www.investing.com/rss/news_25.rss", 3),
 ]
 NEWS_LOOKBACK_HOURS = 12   # أخبار آخر 12 ساعة فقط
 NEWS_MAX_ITEMS = 40
+NEWS_MIN_TITLE_LEN = 25    # تجاهل العناوين القصيرة/الفارغة (ضجيج)
+NEWS_DEDUPE_SIM = 0.85     # دمج الأخبار المتشابهة فوق هذه النسبة
+NEWS_MIN_TIER_FOR_COIN = 2  # أخبار العملات: فقط الطبقتان 1 و2 (الأكثر ثقة)
+
+# ---------- تنقية البيانات: مؤشر الخوف والطمع + التحقق المتبادل للأسعار ----------
+USE_FNG = True
+FNG_API = "https://api.alternative.me/fng/"   # مجاني بدون مفتاح
+MACRO_VERIFY_MAX_DIFF = 2.5  # أقصى فرق مقبول (نقطة مئوية) بين مصدري BTC
 
 # ---------- الخبير: ذاكرة تتعلم من النتائج ----------
 MIN_SAMPLES_FOR_LEARNING = 5  # أقل عدد نتائج سابقة ليعتمد عليها التعلم

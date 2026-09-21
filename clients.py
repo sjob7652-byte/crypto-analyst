@@ -137,12 +137,17 @@ def binance_klines(symbol, interval="1h", limit=24):
 
 
 # ---------- CoinGecko (مجاني بدون مفتاح) ----------
+import json
+import difflib
 import urllib.request
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone, timedelta
 from config import (COINGECKO_API, NEWS_FEEDS, NEWS_LOOKBACK_HOURS,
-                    NEWS_MAX_ITEMS, USER_AGENT)
+                    NEWS_MAX_ITEMS, USER_AGENT, TIER_WEIGHTS,
+                    NEWS_MIN_TITLE_LEN, NEWS_DEDUPE_SIM,
+                    NEWS_MIN_TIER_FOR_COIN, FNG_API,
+                    MACRO_VERIFY_MAX_DIFF)
 
 
 def coingecko_trending():
@@ -177,7 +182,49 @@ def coingecko_macro():
         return None
 
 
-# ---------- الأخبار: عدة مصادر RSS مجانية ----------
+def fear_greed():
+    """مؤشر الخوف والطمع للكريبتو (0-100) — مجاني بدون مفتاح."""
+    try:
+        req = urllib.request.Request(
+            FNG_API + "?limit=1", headers={"User-Agent": "Mozilla/5.0"})
+        data = json.loads(urllib.request.urlopen(req, timeout=12).read().decode())
+        d = data["data"][0]
+        return {"value": int(d["value"]),
+                "label": str(d.get("value_classification", ""))}
+    except Exception:
+        return None
+
+
+def verified_macro():
+    """نبض السوق مع التحقق المتبادل: يقارن تغير BTC بين CoinGecko وBinance.
+    إذا اتفق المصدران → الرقم موثوق. إذا تعارضا كثيراً → غير مؤكد
+    (الخبير لا يبني عليه أي تعديل)."""
+    cg = coingecko_macro()
+    cg_chg = (cg or {}).get("btc_chg")
+    bn_chg = None
+    try:
+        bn_chg = float((binance_ticker("BTCUSDT") or {}).get("priceChangePercent"))
+    except (TypeError, ValueError):
+        bn_chg = None
+    btc_chg, verified = None, False
+    if cg_chg is not None and bn_chg is not None:
+        if abs(cg_chg - bn_chg) <= MACRO_VERIFY_MAX_DIFF:
+            btc_chg = round((cg_chg + bn_chg) / 2, 2)
+            verified = True
+        # else: تعارض بين المصدرين → لا نثق بالرقم
+    elif cg_chg is not None:
+        btc_chg = cg_chg
+    elif bn_chg is not None:
+        btc_chg = bn_chg
+    return {
+        "btc": (cg or {}).get("btc"),
+        "btc_chg": btc_chg,
+        "eth_chg": (cg or {}).get("eth_chg"),
+        "verified": verified,
+    }
+
+
+# ---------- الأخبار: مصادر موثوقة بطبقات ثقة + تنقية ----------
 POS_WORDS = [
     "etf approval", "approves etf", "all-time high", "record high", "ath",
     "rally", "bullish", "surge", "soar", "breakout", "adoption",
@@ -194,7 +241,11 @@ MARKET_WORDS = [
 
 
 class NewsClient:
-    """يجلب الأخبار من عدة مصادر RSS ويحسب معنوياتها (إيجابي/سلبي)."""
+    """يجلب الأخبار من مصادر موثوقة مُصنّفة بطبقات ثقة، ويُنقّيها:
+    - دمج الأخبار المتشابهة (نفس الخبر من عدة مصادر يُحسب مرة واحدة)
+    - تجاهل العناوين القصيرة/الفارغة (ضجيج)
+    - وزن المعنويات حسب ثقة المصدر (Bloomberg/CNBC أثقل من المدونات)
+    """
 
     def __init__(self, feeds=None, hours=NEWS_LOOKBACK_HOURS,
                  max_items=NEWS_MAX_ITEMS):
@@ -202,47 +253,83 @@ class NewsClient:
         self.hours = hours
         self.max_items = max_items
         self.items = []
+        self.stats = {"sources_ok": 0, "sources_fail": 0,
+                      "dupes_merged": 0, "dropped_short": 0}
 
     def fetch(self):
         items = []
-        for name, url in self.feeds:
+        for feed in self.feeds:
+            name, url = feed[0], feed[1]
+            tier = feed[2] if len(feed) > 2 else 3
             try:
                 req = urllib.request.Request(
                     url, headers={"User-Agent": "Mozilla/5.0"})
                 raw = urllib.request.urlopen(req, timeout=12).read()
                 root = ET.fromstring(raw)
-                items += self._parse_rss(root, name)
-                items += self._parse_atom(root, name)
+                got = (self._parse_rss(root, name, tier)
+                       + self._parse_atom(root, name, tier))
+                if got:
+                    self.stats["sources_ok"] += 1
+                else:
+                    self.stats["sources_fail"] += 1
+                items += got
             except Exception:
+                self.stats["sources_fail"] += 1
                 continue
-        # إزالة المكرر + تصفية حسب العمر + الأحدث أولاً
-        seen, uniq = set(), []
         cutoff = datetime.now(timezone.utc) - timedelta(hours=self.hours)
+        filtered = []
         for it in items:
-            if it["link"] in seen or not it["title"]:
+            if len(it["title"]) < NEWS_MIN_TITLE_LEN:
+                self.stats["dropped_short"] += 1
                 continue
-            seen.add(it["link"])
             if it["published"] and it["published"] < cutoff:
                 continue
             it["sentiment"] = self.sentiment(it["title"])
-            uniq.append(it)
-        uniq.sort(key=lambda x: x["published"] or datetime.min.replace(
-            tzinfo=timezone.utc), reverse=True)
-        self.items = uniq[:self.max_items]
+            filtered.append(it)
+        self.items = self._dedupe(filtered)[:self.max_items]
         return self.items
 
-    def _parse_rss(self, root, name):
+    @staticmethod
+    def _norm(title):
+        """تطبيع العنوان للمقارنة: حروف/أرقام فقط بلا تشكيل زائد."""
+        t = "".join(ch for ch in (title or "").lower()
+                    if ch.isalnum() or ch.isspace())
+        return " ".join(t.split())
+
+    def _dedupe(self, items):
+        """دمج الأخبار المتشابهة: نُبقي الأعلى ثقة (الأقدم عند التساوي)."""
+        items.sort(key=lambda x: x["published"] or datetime.min.replace(
+            tzinfo=timezone.utc), reverse=True)
+        kept, norms = [], []
+        for it in items:
+            n = self._norm(it["title"])
+            dup = -1
+            for i, kn in enumerate(norms):
+                if difflib.SequenceMatcher(None, n, kn).ratio() >= NEWS_DEDUPE_SIM:
+                    dup = i
+                    break
+            if dup >= 0:
+                self.stats["dupes_merged"] += 1
+                if it["tier"] < kept[dup]["tier"]:
+                    kept[dup], norms[dup] = it, n
+            else:
+                kept.append(it)
+                norms.append(n)
+        return kept
+
+    def _parse_rss(self, root, name, tier):
         out = []
         for item in root.iter("item"):
             out.append({
                 "source": name,
+                "tier": tier,
                 "title": (item.findtext("title") or "").strip(),
                 "link": (item.findtext("link") or "").strip(),
                 "published": self._parse_date(item.findtext("pubDate")),
             })
         return out
 
-    def _parse_atom(self, root, name):
+    def _parse_atom(self, root, name, tier):
         out = []
         ns = "{http://www.w3.org/2005/Atom}"
         for entry in root.iter(ns + "entry"):
@@ -253,6 +340,7 @@ class NewsClient:
                     break
             out.append({
                 "source": name,
+                "tier": tier,
                 "title": ((entry.findtext(ns + "title") or "").strip()),
                 "link": link.strip(),
                 "published": self._parse_date(
@@ -283,12 +371,14 @@ class NewsClient:
             return 0.0
         return (pos - neg) / (pos + neg)
 
-    def for_coin(self, symbol, name=""):
-        """أخبار تذكر عملة معينة."""
+    def for_coin(self, symbol, name="", min_tier=NEWS_MIN_TIER_FOR_COIN):
+        """أخبار تذكر عملة معينة — فقط من المصادر الموثوقة (الطبقات 1 و2)."""
         sym = (symbol or "").lower().replace("usdt", "")
         nm = (name or "").lower()
         out = []
         for it in self.items:
+            if it.get("tier", 3) > min_tier:
+                continue
             t = it["title"].lower()
             if (sym and len(sym) >= 2 and sym in t) or (nm and nm in t):
                 out.append(it)
@@ -304,8 +394,11 @@ class NewsClient:
         return out
 
     def market_mood(self):
-        """متوسط معنويات أخبار السوق العامة."""
+        """متوسط معنويات أخبار السوق العامة — مرجّح بثقة المصدر."""
         items = self.market_items()
         if not items:
             return 0.0, 0
-        return sum(i["sentiment"] for i in items) / len(items), len(items)
+        wsum = sum(TIER_WEIGHTS.get(i.get("tier", 3), 1.0) for i in items)
+        mood = sum(i["sentiment"] * TIER_WEIGHTS.get(i.get("tier", 3), 1.0)
+                   for i in items) / wsum
+        return mood, len(items)

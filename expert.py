@@ -54,7 +54,7 @@ def verdict_word(prob):
     return "مخاطرة عالية", "🔴"
 
 
-def simple_reasons(res, coin_news):
+def simple_reasons(res, coin_news, fng=None):
     """أسباب بسيطة بكلمات سهلة — أقوى 3 إشارات فقط."""
     m = res.get("metrics") or {}
     out = []
@@ -86,7 +86,19 @@ def simple_reasons(res, coin_news):
     if coin_news:
         pos = [n for n in coin_news if n.get("sentiment", 0) > 0.2]
         if pos:
-            out.append("أخبار إيجابية عنها اليوم")
+            out.append("أخبار إيجابية عنها اليوم من مصادر موثوقة")
+
+    # مؤشر الخوف والطمع: تحذير بسيط عند التطرف
+    fng_v = None
+    if isinstance(fng, dict):
+        fng_v = fng.get("value")
+    elif isinstance(fng, (int, float)):
+        fng_v = fng
+    if fng_v is not None:
+        if fng_v <= 25:
+            out.append("السوق خائف جداً الآن — كن حذراً أكثر")
+        elif fng_v > 75:
+            out.append("الطمع شديد في السوق — قد تكون الأسعار في قمة")
 
     # سبب واحد على الأقل دائماً
     if not out:
@@ -94,11 +106,12 @@ def simple_reasons(res, coin_news):
     return "، ".join(out[:3])
 
 
-def decide(res, coin_news, btc_chg, band_stats):
+def decide(res, coin_news, btc_chg, band_stats, fng=None, macro_verified=True):
     """يبني القرار النهائي: أسعار + نسبة نجاح + سبب + خبر.
 
-    res: نتيجة analyzer | coin_news: أخبار تذكر العملة
+    res: نتيجة analyzer | coin_news: أخبار تذكر العملة (من مصادر موثوقة فقط)
     btc_chg: تغير BTC في 24س (نبض السوق) | band_stats: إحصائيات الذاكرة
+    fng: مؤشر الخوف والطمع | macro_verified: هل رقم BTC مُتحقق من مصدرين؟
     """
     m = res.get("metrics") or {}
     entry = float(m.get("price") or 0)
@@ -108,7 +121,7 @@ def decide(res, coin_news, btc_chg, band_stats):
 
     prob = base_probability(score)
 
-    # 1) أخبار العملة نفسها
+    # 1) أخبار العملة نفسها (من مصادر موثوقة فقط)
     news_sent = 0.0
     if coin_news:
         news_sent = sum(n.get("sentiment", 0) for n in coin_news) / len(coin_news)
@@ -117,9 +130,25 @@ def decide(res, coin_news, btc_chg, band_stats):
     elif news_sent < -0.2:
         prob -= 12
 
-    # 2) نبض السوق العام: إذا البيتكوين ينهار، كل العملات تتأثر
-    if btc_chg is not None and btc_chg <= -5:
+    # 2) نبض السوق العام — فقط إذا كان رقم BTC مُتحققاً من مصدرين
+    if macro_verified and btc_chg is not None and btc_chg <= -5:
         prob -= 8
+
+    # 2ب) مؤشر الخوف والطمع: التطرف في أي اتجاه = مخاطرة أعلى
+    fng_v = None
+    if isinstance(fng, dict):
+        fng_v = fng.get("value")
+    elif isinstance(fng, (int, float)):
+        fng_v = fng
+    if fng_v is not None:
+        if fng_v <= 25:
+            prob -= 6   # خوف شديد: بيع مذعور
+        elif fng_v < 45:
+            prob -= 3
+        elif fng_v > 75:
+            prob -= 6   # طمع شديد: السوق قد تكون في قمة
+        elif fng_v >= 55:
+            prob -= 2
 
     # 3) ذاكرة الخبير: ماذا حصل فعلاً مع إشارات بنفس الفئة؟
     band = band_of(score)
@@ -148,7 +177,9 @@ def decide(res, coin_news, btc_chg, band_stats):
         "emoji": emoji,
         "band": band,
         "learned": learned,
-        "reason": simple_reasons(res, coin_news),
+        "reason": simple_reasons(res, coin_news, fng),
         "news": top_news,
         "warn": warn,
+        "fng": fng_v,
+        "macro_verified": macro_verified,
     }

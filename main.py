@@ -12,20 +12,25 @@ import expert
 import state as st
 from config import (
     CHAINS, SCAN_LIMIT, MIN_LIQUIDITY_USD, MIN_VOLUME_24H_USD,
-    MAX_PAIR_AGE_DAYS, WATCHLIST, TAKE_PROFITS, STOP_LOSS,
+    MIN_TXNS_24H, MAX_PAIR_AGE_DAYS, WATCHLIST, TAKE_PROFITS, STOP_LOSS,
     POSITION_MAX_AGE_DAYS, DIGEST_HOURS_UTC, USE_COINGECKO, USE_NEWS,
+    USE_FNG,
 )
 
 
 def build_context(s):
-    """سياق الخبير: الأخبار + العملات الرائجة + نبض السوق + ذاكرة النتائج."""
-    ctx = {"news": [], "trending": [], "macro": None, "nc": None}
+    """سياق الخبير: الأخبار الموثوقة + العملات الرائجة + نبض مُتحقق + ذاكرة النتائج."""
+    ctx = {"news": [], "trending": [], "macro": None, "nc": None,
+           "fng": None, "news_stats": {}}
     if USE_NEWS:
         try:
             nc = clients.NewsClient()
             ctx["news"] = nc.fetch()
             ctx["nc"] = nc
-            print(f"أخبار: {len(ctx['news'])} عنواناً من {len(nc.feeds)} مصادر")
+            ctx["news_stats"] = nc.stats
+            print(f"أخبار: {len(ctx['news'])} عنواناً من "
+                  f"{nc.stats['sources_ok']} مصادر موثوقة "
+                  f"(مكرر مُزال: {nc.stats['dupes_merged']})")
         except Exception as e:
             print("news error:", e)
     if USE_COINGECKO:
@@ -34,9 +39,19 @@ def build_context(s):
         except Exception:
             pass
         try:
-            ctx["macro"] = clients.coingecko_macro()
-            if ctx["macro"]:
-                print(f"BTC: {ctx['macro']['btc_chg']:+.1f}% (24س)")
+            ctx["macro"] = clients.verified_macro()
+            m = ctx["macro"]
+            if m and m.get("btc_chg") is not None:
+                v = "✓ مُتحقق من مصدرين" if m.get("verified") else "؟ غير مؤكد"
+                print(f"BTC: {m['btc_chg']:+.1f}% (24س) [{v}]")
+        except Exception:
+            pass
+    if USE_FNG:
+        try:
+            ctx["fng"] = clients.fear_greed()
+            if ctx["fng"]:
+                print(f"الخوف والطمع: {ctx['fng']['value']}/100 "
+                      f"({ctx['fng']['label']})")
         except Exception:
             pass
     ctx["band_stats"] = st.band_stats(s)
@@ -56,7 +71,9 @@ def make_verdict(res, ctx):
     coin_news = nc.for_coin(sym) if nc else []
     macro = ctx.get("macro") or {}
     return expert.decide(res, coin_news, macro.get("btc_chg"),
-                         ctx.get("band_stats"))
+                         ctx.get("band_stats"),
+                         fng=ctx.get("fng"),
+                         macro_verified=macro.get("verified", False))
 
 
 def pick_best_pair(pairs):
@@ -90,9 +107,13 @@ def scan_new_coins(s, dry_run, ctx):
     for p in pick_best_pair(pairs):
         liq = float((p.get("liquidity") or {}).get("usd") or 0)
         vol = float((p.get("volume") or {}).get("h24") or 0)
+        tx = (p.get("txns") or {}).get("h24") or {}
+        ntx = float(tx.get("buys") or 0) + float(tx.get("sells") or 0)
         created = p.get("pairCreatedAt") or 0
         age_d = (now_ms - created) / 86400000 if created else 99999
         if liq < MIN_LIQUIDITY_USD or vol < MIN_VOLUME_24H_USD:
+            continue
+        if ntx < MIN_TXNS_24H:   # تنقية: عملات بلا نشاط حقيقي = ضجيج
             continue
         if age_d > MAX_PAIR_AGE_DAYS:
             continue
@@ -274,6 +295,8 @@ def maybe_digest(s, dry_run, movers, ctx):
         "trending": ctx.get("trending"),
         "news_top": news_top,
         "track": st.track_summary(s),
+        "fng": ctx.get("fng"),
+        "news_stats": ctx.get("news_stats") or {},
     }
     date_str = now.strftime("%Y-%m-%d")
     print("=== إرسال الملخص اليومي ===")
