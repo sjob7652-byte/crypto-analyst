@@ -4,7 +4,7 @@ import time
 from config import (
     SCORE_STRONG_BUY, SCORE_BUY, SCORE_WATCH,
     MIN_LIQUIDITY_USD, MIN_VOLUME_24H_USD, MAX_PAIR_AGE_DAYS,
-    WASH_RATIO_LIMIT, ZERO_WIDTH_CHARS, KNOWN_SYMBOLS,
+    WASH_RATIO_LIMIT, HOLDER_TOP10_REJECT, ZERO_WIDTH_CHARS, KNOWN_SYMBOLS,
     FDV_LIQ_RATIO_LIMIT,
 )
 
@@ -87,9 +87,12 @@ def analyze_pair(pair, security=None, boosted=False, holders=None):
     elif 5 < ratio <= 15:
         score += 8; reasons.append("حجم مرتفع — زخم قوي حول العملة")
     elif ratio > WASH_RATIO_LIMIT:
-        # تداول وهمي: الحجم أضعاف السيولة بكثير = نفس الشخص يشتري ويبيع لنفسه
-        score += 2
-        warnings.append("⚠ حجم مشبوه: التداول أضعاف السيولة بكثير — قد يكون وهمياً")
+        # تداول وهمي مؤكد: الحجم أضعاف السيولة بكثير = محافظ المطور تشتري
+        # وتبيع لنفسها لخلق حركة مزيفة — رفض فوري بلا نقاط
+        warnings.append(f"⛔ تداول وهمي: الحجم يعادل {ratio:.0f}x السيولة — "
+                        "حركة مصطنعة بين محافظ المطور، مرفوضة فوراً")
+        return _result(3, pair, base, quote, price, liq, vol24, pc1h, pc24h,
+                       buys, sells, age_h, reasons, warnings)
     else:
         score += 3; warnings.append("حجم التداول غير متوازن مع السيولة")
 
@@ -170,17 +173,16 @@ def analyze_pair(pair, security=None, boosted=False, holders=None):
         reasons.append("الفريق يروّج لها الآن بترويج مدفوع — اهتمام متزايد حولها")
 
     # 9) تركيز الحيتان 🐋 (Solana — من تقرير RugCheck الكامل):
-    # أكبر 10 محافظ تملك حصة كبيرة = خطر بيع جماعي (Dump) في أي لحظة
+    # أكبر 10 محافظ فوق 20% من العرض = رفض فوري (خطر تفريغ جماعي)
     if holders is not None:
-        if holders >= 50:
-            score = min(score, 10)
-            warnings.append(f"⛔ تركيز حيتان خطير: أكبر 10 محافظ تملك {holders:.1f}% "
-                            "من العرض — خطر بيع جماعي مرتفع جداً")
-        elif holders >= 40:
-            score -= 25
-            warnings.append(f"تركيز حيتان مرتفع: أكبر 10 محافظ تملك {holders:.1f}% "
-                            "— احتمال Dump قوي")
-        elif holders >= 30:
+        if holders > HOLDER_TOP10_REJECT:
+            warnings.append(f"⛔ تركيز خطير: أكبر 10 محافظ تملك {holders:.1f}% "
+                            f"من العرض (فوق حد {HOLDER_TOP10_REJECT}%) — "
+                            "المطور/الحيتان يقدرون يفرغون في أي لحظة")
+            return _result(3, pair, base, quote, price, liq, vol24, pc1h, pc24h,
+                           buys, sells, age_h, reasons, warnings,
+                           boosted=boosted, fdv=fdv, holders=holders)
+        elif holders >= 15:
             score -= 12
             warnings.append(f"تركيز حيتان متوسط: أكبر 10 محافظ تملك {holders:.1f}%")
         else:
