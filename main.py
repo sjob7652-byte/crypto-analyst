@@ -402,6 +402,32 @@ def paper_buy(s, res, verdict=None):
     return True
 
 
+def _archive_closed(p, pos, exit_price, pnl, reason):
+    """ينقل الصفقة المغلقة إلى الأرشيف مع كل تفاصيلها — لا تُحذف أبداً.
+    reason: TP (اكتمال الأهداف) | SL (وقف الخسارة) | RUG (انهيار) |
+            EXPIRED (انتهاء المدة)."""
+    inv = pos.get("invested") or 0
+    rec = {
+        "name": pos.get("name"),
+        "symbol": pos.get("symbol"),
+        "kind": pos.get("kind"),
+        "chain": pos.get("chain"),
+        "entry": pos.get("entry"),
+        "exit": exit_price,
+        "invested": round(inv, 2),
+        "pnl": round(pnl, 2),
+        "pnl_pct": round(pnl / inv * 100, 2) if inv else 0.0,
+        "reason": reason,
+        "entry_time": pos.get("entry_time"),
+        "close_time": time.time(),
+    }
+    arch = p.setdefault("closed_trades", [])
+    arch.append(rec)
+    # حد أقصى: أحدث 2000 صفقة — لمنع تضخم الـGist مع الزمن
+    if len(arch) > 2000:
+        del arch[:len(arch) - 2000]
+
+
 def update_paper(s, dry_run):
     """يتابع الصفقات الوهمية: بيع جزئي عند الأهداف، بيع كامل عند وقف الخسارة."""
     p = s["paper"]
@@ -434,6 +460,7 @@ def update_paper(s, dry_run):
                         p["wins"] += 1
                     else:
                         p["losses"] += 1
+                    _archive_closed(p, pos, eff_price, pnl, "TP")
                     closed.append(pid)
                     alerts.send(alerts.paper_closed_msg(
                         pos["name"], pnl,
@@ -455,6 +482,7 @@ def update_paper(s, dry_run):
             if rug and loss >= RUG_BLACKLIST_LOSS:
                 blacklist_rug(s, pos, loss)
             reason = "🚨 انهيار مفاجئ (Rug Pull)" if rug else "وقف الخسارة 🛑"
+            _archive_closed(p, pos, eff_price, pnl, "RUG" if rug else "SL")
             print(f"  -> وهمي: {'انهيار' if rug else 'وقف خسارة'} "
                   f"{pos['name']} (${pnl:+.2f})")
             alerts.send(alerts.paper_closed_msg(
@@ -471,6 +499,7 @@ def update_paper(s, dry_run):
                 p["wins"] += 1
             else:
                 p["losses"] += 1
+            _archive_closed(p, pos, eff_price, pnl, "EXPIRED")
             closed.append(pid)
     for pid in closed:
         p["positions"].pop(pid, None)

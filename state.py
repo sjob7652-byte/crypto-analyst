@@ -68,6 +68,8 @@ def _defaults(s):
     s.setdefault("history", [])
     s.setdefault("waitlist", {})
     s.setdefault("paper", _default_paper())
+    # أرشيف الصفقات المغلقة — يُملأ تدريجياً منذ هذا التحديث
+    s["paper"].setdefault("closed_trades", [])
     return s
 
 
@@ -109,7 +111,8 @@ def _file_save(s):
 
 def _default_paper():
     return {"cash": PAPER_START_BALANCE, "start": PAPER_START_BALANCE,
-            "positions": {}, "trades": 0, "wins": 0, "losses": 0}
+            "positions": {}, "trades": 0, "wins": 0, "losses": 0,
+            "closed_trades": []}  # أرشيف: كل صفقة خرج منها البوت مع ربحها/خسارتها
 
 
 def load():
