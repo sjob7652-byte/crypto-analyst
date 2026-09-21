@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """المشغّل الرئيسي: فحص العملات الجديدة → تحليل → تنبيه → متابعة الصفقات."""
 import argparse
+import html
 import time
 from datetime import datetime, timezone
 
@@ -200,12 +201,18 @@ def scan_new_coins(s, dry_run, ctx):
     for p in cands:
         chain = p.get("chainId")
         addr = (p.get("baseToken") or {}).get("address")
+        # فحص السلامة: زوج بلا سعر = بيانات ناقصة — يُتجاهل (لا قرارات على فراغ)
+        if not analyzer._f(p.get("priceUsd")):
+            continue
         boosted = (chain, (addr or "").lower()) in boosted_set
         sec = clients.token_security(chain, addr) if addr else None
+        # الافتراض الآمن: فشل فحص الأمان لعملة بعنوان معروف = مرفوضة
+        sec_failed = bool(addr) and sec is None
         # 🐋 فحص تركيز الحيتان (Solana فقط — مجاني بلا مفتاح عبر RugCheck)
         holders = (clients.solana_top10_pct(addr)
                    if (chain == "solana" and addr) else None)
-        res = analyzer.analyze_pair(p, sec, boosted=boosted, holders=holders)
+        res = analyzer.analyze_pair(p, sec, boosted=boosted, holders=holders,
+                                    security_unknown=sec_failed)
         res["id"] = f"dex:{chain}:{p.get('pairAddress')}"
         res["kind"] = "dex"
         res["chain"] = chain
@@ -281,9 +288,16 @@ def check_waitlist(s, dry_run, ctx):
         sec = clients.token_security(e["chain"],
                                       (p.get("baseToken") or {}).get("address"))
         addr = (p.get("baseToken") or {}).get("address")
+        # فحص السلامة: زوج بلا سعر = بيانات ناقصة — يُتجاهل
+        if not analyzer._f(p.get("priceUsd")):
+            wl.pop(wid, None)
+            continue
+        # الافتراض الآمن: فشل فحص الأمان = مرفوضة
+        sec_failed = bool(addr) and sec is None
         holders = (clients.solana_top10_pct(addr)
                    if (e["chain"] == "solana" and addr) else None)
-        res = analyzer.analyze_pair(p, sec, holders=holders)
+        res = analyzer.analyze_pair(p, sec, holders=holders,
+                                    security_unknown=sec_failed)
         res["id"] = wid
         res["kind"] = "dex"
         res["chain"] = e["chain"]
@@ -657,12 +671,36 @@ def maybe_digest(s, dry_run, movers, ctx):
                                   movers, dctx), dry_run)
 
 
+def _sos_alert(error):
+    """تنبيه الطوارئ: قبل الانهيار، نخبر المستخدم أن النظام توقف —
+    حتى لا يعيش في وهم أن 'السوق هادئ' بينما البوت معطل."""
+    try:
+        alerts.send(
+            "🚨 <b>توقف النظام عن العمل بسبب خطأ تقني</b>\n"
+            f"السبب: {html.escape(str(error)[:300])}\n"
+            "يرجى مراجعة سجلات GitHub Actions فوراً.", dry_run=False)
+    except Exception as e:
+        print("SOS failed:", e)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true",
                     help="طباعة الرسائل بدل إرسالها وعدم حفظ الحالة")
     a = ap.parse_args()
 
+    try:
+        _run(a)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"[!] انهيار غير متوقع: {e}")
+        if not a.dry_run:
+            _sos_alert(e)
+        raise  # يفشل الـworkflow بعلامة حمراء — وضوح كامل
+
+
+def _run(a):
     s = st.load()
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     if s["stats"].get("day") != today:

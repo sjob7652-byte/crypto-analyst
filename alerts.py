@@ -3,8 +3,10 @@
 import html
 import os
 import re
+import time
 import requests
-from config import REQUEST_TIMEOUT, TAKE_PROFITS, STOP_LOSS
+from config import (REQUEST_TIMEOUT, TAKE_PROFITS, STOP_LOSS,
+                    TG_MAX_RETRIES, TG_RETRY_BASE, TG_PENDING_MAX)
 
 DISCLAIMER = ("⚠️ عملات الميم خطيرة جداً — خاطر بمبلغ صغير فقط "
               "تتحمّل خسارته كاملة. هذه ليست نصيحة مالية.")
@@ -23,8 +25,52 @@ def wallet_link(res):
     return f"{DASHBOARD_BASE}{q}#trade-{_slug(res.get('id'))}"
 
 
+# طابور الرسائل الفاشلة: تُحفظ في الذاكرة وتُعاد محاولة إرسالها
+# في بداية كل استدعاء لاحق — لا تضيع تنبيهات الانهيار في صمت
+_PENDING = []
+
+
+def _post_message(token, chat, text):
+    """محاولة إرسال واحدة. تعيد (نجح؟, يستحق_إعادة؟)."""
+    try:
+        r = requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat, "text": text, "parse_mode": "HTML",
+                  "disable_web_page_preview": True},
+            timeout=REQUEST_TIMEOUT,
+        )
+        if r.status_code == 200:
+            return True, False
+        # 429 (حظر مؤقت) و5xx = يستحق إعادة المحاولة
+        if r.status_code == 429 or 500 <= r.status_code < 600:
+            wait = TG_RETRY_BASE
+            try:
+                wait = max(wait, int(r.headers.get("Retry-After", wait)))
+            except (TypeError, ValueError):
+                pass
+            time.sleep(wait)
+            return False, True
+        print(f"Telegram rejected ({r.status_code}): {r.text[:120]}")
+        return False, False
+    except Exception as e:
+        print("Telegram error:", e)
+        return False, True
+
+
+def _flush_pending(token, chat):
+    """يفرغ طابور الرسائل المعلقة قبل إرسال الجديدة."""
+    while _PENDING:
+        text = _PENDING[0]
+        ok, _ = _post_message(token, chat, text)
+        if not ok:
+            break
+        _PENDING.pop(0)
+        print(f"  -> أُعيد إرسال رسالة معلقة (متبقٍ: {len(_PENDING)})")
+
+
 def send(text, dry_run=False):
-    """يرسل رسالة Telegram. في وضع التجربة يطبع فقط."""
+    """يرسل رسالة Telegram مع إعادة المحاولة والطابور.
+    في وضع التجربة يطبع فقط."""
     if dry_run:
         print(text)
         print("—" * 45)
@@ -36,17 +82,25 @@ def send(text, dry_run=False):
         print(text)
         print("—" * 45)
         return False
-    try:
-        r = requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat, "text": text, "parse_mode": "HTML",
-                  "disable_web_page_preview": True},
-            timeout=REQUEST_TIMEOUT,
-        )
-        return r.status_code == 200
-    except Exception as e:
-        print("Telegram error:", e)
-        return False
+    _flush_pending(token, chat)
+    wait = TG_RETRY_BASE
+    for attempt in range(TG_MAX_RETRIES):
+        ok, retryable = _post_message(token, chat, text)
+        if ok:
+            return True
+        if not retryable or attempt == TG_MAX_RETRIES - 1:
+            break
+        time.sleep(wait)
+        wait *= 2
+    # فشل كل المحاولات: تُحفظ في الطابور (بحد أقصى) بدل الضياع
+    if len(_PENDING) < TG_PENDING_MAX:
+        _PENDING.append(text)
+    else:
+        _PENDING.pop(0)
+        _PENDING.append(text)
+    print(f"[!] تعذّر إرسال التنبيه بعد {TG_MAX_RETRIES} محاولات — "
+          f"حُفظ في الطابور ({len(_PENDING)} معلقة)")
+    return False
 
 
 def fmt_usd(x):

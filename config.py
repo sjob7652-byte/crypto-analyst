@@ -139,14 +139,23 @@ HONEYPOT_CHAIN_IDS = {
     "base": 8453, "arbitrum": 42161, "optimism": 10,
 }
 
-REQUEST_TIMEOUT = 20
+REQUEST_TIMEOUT = 10   # مهلة صارمة: أي API لا يرد في 10 ثوانٍ = فاشل (بلا تعليق)
 USER_AGENT = "memecoin-analyst/1.0 (free-tier)"
 # بصمة متصفح حقيقي: بعض الـAPIs تحظر عناوين البوتات المعروفة (429)
 BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
-# إستراتيجية إعادة المحاولة عند الحظر المؤقت (429/5xx): 3محاولات بانتظار 3ث ثم 6ث
+# إستراتيجية إعادة المحاولة عند الحظر المؤقت (429/5xx): 3 محاولات بانتظار 2ث ثم 4ث ثم 8ث
 BACKOFF_TRIES = 3
-BACKOFF_BASE = 3  # ثواني — يتضاعف بعد كل فشل
+BACKOFF_BASE = 2  # ثواني — يتضاعف بعد كل فشل
+
+# ---------- المرونة ضد الأعطال (Resilience) ----------
+# الافتراض الآمن: تعذّر فحص أمان العقد = العملة خطيرة ومرفوضة (Fail-Safe)
+SECURITY_FAILSAFE_REJECT = True
+# موثوقية Telegram: إعادة المحاولة عند الفشل (429/5xx) — 2ث ثم 4ث ثم 8ث
+TG_MAX_RETRIES = 3
+TG_RETRY_BASE = 2
+# طابور الرسائل الفاشلة: أقصى عدد رسائل معلقة تُحفظ بين الجولات
+TG_PENDING_MAX = 20
 
 # ---------- جسر أخبار X عبر Telegram (Telethon) ----------
 USE_XBRIDGE = True       # يحتاج أسرار TG_API_ID/TG_API_HASH/TG_SESSION/XBRIDGE_CHANNELS

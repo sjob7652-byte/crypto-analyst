@@ -89,11 +89,22 @@ def _file_load():
 
 
 def _file_save(s):
+    """كتابة ذرية: ملف مؤقت → fsync → استبدال في جزء من الثانية.
+    لو تعطل السكربت أثناء الكتابة، الملف الأصلي يبقى سليماً (لا تلف أبداً)."""
+    tmp = PATH + ".tmp"
     try:
-        with open(PATH, "w", encoding="utf-8") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(s, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, PATH)  # عملية ذرية على نفس القرص
     except Exception as e:
         print("state save error:", e)
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except Exception:
+            pass
 
 
 def _default_paper():

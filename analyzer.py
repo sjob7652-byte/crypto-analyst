@@ -5,7 +5,7 @@ from config import (
     SCORE_STRONG_BUY, SCORE_BUY, SCORE_WATCH,
     MIN_LIQUIDITY_USD, MIN_VOLUME_24H_USD, MAX_PAIR_AGE_DAYS,
     WASH_RATIO_LIMIT, HOLDER_TOP10_REJECT, ZERO_WIDTH_CHARS, KNOWN_SYMBOLS,
-    FDV_LIQ_RATIO_LIMIT,
+    FDV_LIQ_RATIO_LIMIT, SECURITY_FAILSAFE_REJECT,
 )
 
 
@@ -41,9 +41,11 @@ def signal_of(score):
     return "AVOID"
 
 
-def analyze_pair(pair, security=None, boosted=False, holders=None):
+def analyze_pair(pair, security=None, boosted=False, holders=None,
+                 security_unknown=False):
     """تقييم عملة جديدة من بيانات Dexscreener + فحص العقد.
-    boosted: هل الفريق يروّج لها بترويج مدفوع على Dexscreener؟"""
+    boosted: هل الفريق يروّج لها بترويج مدفوع على Dexscreener؟
+    security_unknown: تعذّر فحص الأمان (API فشل) — الافتراض الآمن يرفضها فوراً."""
     reasons, warnings = [], []
     score = 0
 
@@ -65,6 +67,14 @@ def analyze_pair(pair, security=None, boosted=False, holders=None):
     ok, why = check_symbol(base)
     if not ok:
         warnings.append(f"⛔ {why}")
+        return _result(3, pair, base, quote, price, liq, vol24, pc1h, pc24h,
+                       buys, sells, age_h, reasons, warnings)
+
+    # 0ب) الافتراض الآمن (Fail-Safe): فشل فحص الأمان = عملة خطيرة ومرفوضة
+    # (لا نتجاوز الفحص أبداً — الغياب التام للبيانات أخطر من البيانات السيئة)
+    if security_unknown and SECURITY_FAILSAFE_REJECT:
+        warnings.append("⛔ تعذّر فحص أمان العقد (API لا يستجيب) — "
+                        "الافتراض الآمن: مرفوضة حتى يتوفر الفحص")
         return _result(3, pair, base, quote, price, liq, vol24, pc1h, pc24h,
                        buys, sells, age_h, reasons, warnings)
 
