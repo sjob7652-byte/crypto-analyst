@@ -437,11 +437,13 @@ def paper_buy(s, res, verdict=None):
     return True
 
 
-def _archive_closed(p, pos, exit_price, pnl, reason):
+def _archive_closed(p, pos, exit_price, pnl, reason, invested_override=None):
     """ينقل الصفقة المغلقة إلى الأرشيف مع كل تفاصيلها — لا تُحذف أبداً.
-    reason: TP (اكتمال الأهداف) | SL (وقف الخسارة) | RUG (انهيار) |
-            EXPIRED (انتهاء المدة)."""
-    inv = pos.get("invested") or 0
+    reason: TP1 (جني جزئي 50%) | BE (تعادل: خروج عند الدخول بعد الجني) |
+            TP (اكتمال الأهداف) | SL (وقف الخسارة) | RUG (انهيار) |
+            EXPIRED (انتهاء المدة).
+    invested_override: للجني الجزئي — تُحسب النسبة على الجزء المُباع فقط."""
+    inv = invested_override if invested_override else (pos.get("invested") or 0)
     rec = {
         "name": pos.get("name"),
         "symbol": pos.get("symbol"),
@@ -475,60 +477,67 @@ def update_paper(s, dry_run):
         if not price:
             continue
         entry = pos["entry"]
+        # ترحيل: صفقات قديمة قبل تبسيط الأهداف (3 → 1)
+        th = pos.get("tp_hit") or []
+        pos["tp_hit"] = (th + [False] * len(TAKE_PROFITS))[:len(TAKE_PROFITS)]
+        if pos["tp_hit"][0] and not pos.get("be"):
+            pos["be"] = True  # وصلت الهدف سابقاً → وقفها الآن عند الدخول
         # سعر التنفيذ الواقعي عند البيع (أرخص بسبب الانزلاق) — التفعيل يبقى
         # على سعر السوق الخام، لكن التنفيذ الفعلي ينزلق
         eff_price = price * (1 - PAPER_SLIPPAGE)
-        # أهداف البيع (بيع جزئي)
+        # الهدف الوحيد (+30%): بيع 50% فوراً + نقل وقف الخسارة لسعر الدخول
         for i, tp in enumerate(TAKE_PROFITS):
             if not pos["tp_hit"][i] and price >= entry * (1 + tp):
                 pos["tp_hit"][i] = True
                 sell_qty = pos["qty"] * PAPER_SELL_FRACTIONS[i]
                 proceeds = sell_qty * eff_price
+                part_pnl = proceeds - sell_qty * entry
                 pos["qty"] -= sell_qty
-                pos["realized"] += proceeds - sell_qty * entry
+                pos["realized"] += part_pnl
+                pos["be"] = True  # 🛡️ النصف المتبقي أصبح خالي المخاطر
                 p["cash"] += proceeds
-                print(f"  -> وهمي: بيع {pos['name']} عند TP{i + 1} "
-                      f"(${proceeds:.2f} بعد الانزلاق)")
-                if all(pos["tp_hit"]):
-                    pnl = pos["realized"]
-                    if pnl >= 0:
-                        p["wins"] += 1
-                    else:
-                        p["losses"] += 1
-                    _archive_closed(p, pos, eff_price, pnl, "TP")
-                    closed.append(pid)
-                    alerts.send(alerts.paper_closed_msg(
-                        pos["name"], pnl,
-                        pnl / pos["invested"] * 100 if pos["invested"] else 0,
-                        "اكتملت الأهداف 🎯", p["cash"]), dry_run)
-                else:
-                    # جني جزئي حقيقي: نُعلن البيع الفعلي لا مجرد نصيحة
-                    orig_qty = pos["invested"] / entry if entry else 0
-                    remaining_pct = (pos["qty"] / orig_qty * 100
-                                     if orig_qty else 0)
-                    alerts.send(alerts.paper_tp_msg(
-                        pos["name"], i, PAPER_SELL_FRACTIONS[i] * 100,
-                        proceeds, pos["realized"], remaining_pct,
-                        p["cash"]), dry_run)
+                print(f"  -> وهمي: جني جزئي 50% {pos['name']} "
+                      f"(+${part_pnl:.2f} محقق) — وقف الخسارة → الدخول")
+                # أرشفة الجني الجزئي كحدث مستقل
+                _archive_closed(p, pos, eff_price, part_pnl, "TP1",
+                                invested_override=sell_qty * entry)
+                # جني جزئي حقيقي: نُعلن البيع الفعلي لا مجرد نصيحة
+                orig_qty = pos["invested"] / entry if entry else 0
+                remaining_pct = (pos["qty"] / orig_qty * 100
+                                 if orig_qty else 0)
+                alerts.send(alerts.paper_tp_msg(
+                    pos["name"], i, PAPER_SELL_FRACTIONS[i] * 100,
+                    proceeds, pos["realized"], remaining_pct,
+                    p["cash"]), dry_run)
                 break
         if pid in closed:
             continue
-        # وقف الخسارة: بيع كل الكمية المتبقية
+        # وقف الخسارة: بعد الجني ينتقل لسعر الدخول (تعادل) — قبل الجني -15%
         # (خسارة ≥70% فجأة → "انهيار" Rug Pull بدل وقف الخسارة العادي)
-        if price <= entry * (1 - STOP_LOSS):
+        stop = entry if pos.get("be") else entry * (1 - STOP_LOSS)
+        if price <= stop:
             loss = 1 - price / entry
             proceeds = pos["qty"] * eff_price
             pnl = proceeds - pos["qty"] * entry + pos["realized"]
             p["cash"] += proceeds
-            p["losses"] += 1
             closed.append(pid)
             rug = loss >= RUG_ALERT_LOSS
             if rug and loss >= RUG_BLACKLIST_LOSS:
                 blacklist_rug(s, pos, loss)
-            reason = "🚨 انهيار مفاجئ (Rug Pull)" if rug else "وقف الخسارة 🛑"
-            _archive_closed(p, pos, eff_price, pnl, "RUG" if rug else "SL")
-            print(f"  -> وهمي: {'انهيار' if rug else 'وقف خسارة'} "
-                  f"{pos['name']} (${pnl:+.2f})")
+            if rug:
+                reason, arch = "🚨 انهيار مفاجئ (Rug Pull)", "RUG"
+                p["losses"] += 1
+            elif pos.get("be"):
+                reason, arch = "⚖️ تعادل: خروج عند سعر الدخول", "BE"
+                if pnl >= 0:
+                    p["wins"] += 1
+                else:
+                    p["losses"] += 1
+            else:
+                reason, arch = "وقف الخسارة 🛑", "SL"
+                p["losses"] += 1
+            _archive_closed(p, pos, eff_price, pnl, arch)
+            print(f"  -> وهمي: {arch} {pos['name']} (${pnl:+.2f})")
             alerts.send(alerts.paper_closed_msg(
                 pos["name"], pnl,
                 pnl / pos["invested"] * 100 if pos["invested"] else 0,
@@ -592,25 +601,27 @@ def update_positions(s, dry_run):
         if not price:
             continue
         entry = pos["entry"]
-        # أهداف البيع
+        # ترحيل: صفقات قديمة قبل تبسيط الأهداف (3 → 1)
+        th = pos.get("tp_hit") or []
+        pos["tp_hit"] = (th + [False] * len(TAKE_PROFITS))[:len(TAKE_PROFITS)]
+        if pos["tp_hit"][0] and not pos.get("be"):
+            pos["be"] = True
+        # الهدف الوحيد (+30%): تنبيه + نقل وقف الخسارة لسعر الدخول
         for i, tp in enumerate(TAKE_PROFITS):
             if not pos["tp_hit"][i] and price >= entry * (1 + tp):
                 pos["tp_hit"][i] = True
                 pos["best_hit"] = f"tp{i + 1}"
-                if all(pos["tp_hit"]):
-                    print(f"  -> اكتملت الأهداف: {pos['name']}")
-                    alerts.send(alerts.all_tp_msg(pos["name"], entry, price), dry_run)
-                    st.record_outcome(s, pos, "tp3")
-                    closed.append(pid)
-                else:
-                    print(f"  -> تحقق الهدف {i + 1}: {pos['name']}")
-                    alerts.send(alerts.tp_hit_msg(pos["name"], entry, price, i), dry_run)
+                pos["be"] = True  # 🛡️ النصف المتبقي أصبح خالي المخاطر
+                print(f"  -> تحقق الهدف: {pos['name']} — وقف الخسارة → الدخول")
+                alerts.send(alerts.tp_hit_msg(pos["name"], entry, price, i), dry_run)
                 break
         if pid in closed:
             continue
         # وقف الخسارة — أو "انهيار مفاجئ" إن تجاوزت الخسارة 70% فجأة
         # (يُرجح سحب سيولة، فيُسجل كنوع مستقل "rug" بدل "sl")
-        if price <= entry * (1 - STOP_LOSS):
+        # بعد الجني: الوقف عند سعر الدخول (تعادل) بدل -15%
+        stop = entry if pos.get("be") else entry * (1 - STOP_LOSS)
+        if price <= stop:
             loss = 1 - price / entry
             if loss >= RUG_ALERT_LOSS:
                 blacklisted = (blacklist_rug(s, pos, loss)
@@ -619,6 +630,10 @@ def update_positions(s, dry_run):
                 alerts.send(alerts.rug_pull_msg(pos["name"], entry, price,
                                                 blacklisted), dry_run)
                 st.record_outcome(s, pos, "rug")
+            elif pos.get("be"):
+                print(f"  -> ⚖️ تعادل: {pos['name']} (خروج عند الدخول)")
+                alerts.send(alerts.be_stop_msg(pos["name"], entry), dry_run)
+                st.record_outcome(s, pos, "tp1")  # الهدف تحقق والباقي خرج متعادلاً
             else:
                 print(f"  -> وقف الخسارة: {pos['name']}")
                 alerts.send(alerts.stop_loss_msg(pos["name"], entry, price),

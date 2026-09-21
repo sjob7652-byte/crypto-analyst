@@ -31,15 +31,15 @@ import alerts
 import clients
 import state
 
-WIN_OUTCOMES = ("tp1", "tp2", "tp3")
+WIN_OUTCOMES = ("tp1", "tp2", "tp3", "be")
 DAY = 24 * 3600
 
 # عائد تقديري لكل نتيجة (على صفقة وهمية) — بعد خصم الانزلاق تقريباً
 OUTCOME_PCT = {"tp1": 0.24, "tp2": 0.62, "tp3": 1.38, "sl": -0.28,
-               "rug": -0.90, "expired": 0.0}
+               "rug": -0.90, "expired": 0.0, "be": 0.09}
 OUTCOME_AR = {"tp1": "الهدف 1", "tp2": "الهدف 2", "tp3": "الهدف 3",
               "sl": "وقف الخسارة", "rug": "سحب سيولة 🧨",
-              "expired": "انتهت المدة"}
+              "expired": "انتهت المدة", "be": "تعادل مؤمن ⚖️"}
 
 
 # ---------- جمع البيانات ----------
