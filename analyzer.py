@@ -41,7 +41,7 @@ def signal_of(score):
     return "AVOID"
 
 
-def analyze_pair(pair, security=None, boosted=False):
+def analyze_pair(pair, security=None, boosted=False, holders=None):
     """تقييم عملة جديدة من بيانات Dexscreener + فحص العقد.
     boosted: هل الفريق يروّج لها بترويج مدفوع على Dexscreener؟"""
     reasons, warnings = [], []
@@ -169,13 +169,32 @@ def analyze_pair(pair, security=None, boosted=False):
         score += 5
         reasons.append("الفريق يروّج لها الآن بترويج مدفوع — اهتمام متزايد حولها")
 
+    # 9) تركيز الحيتان 🐋 (Solana — من تقرير RugCheck الكامل):
+    # أكبر 10 محافظ تملك حصة كبيرة = خطر بيع جماعي (Dump) في أي لحظة
+    if holders is not None:
+        if holders >= 50:
+            score = min(score, 10)
+            warnings.append(f"⛔ تركيز حيتان خطير: أكبر 10 محافظ تملك {holders:.1f}% "
+                            "من العرض — خطر بيع جماعي مرتفع جداً")
+        elif holders >= 40:
+            score -= 25
+            warnings.append(f"تركيز حيتان مرتفع: أكبر 10 محافظ تملك {holders:.1f}% "
+                            "— احتمال Dump قوي")
+        elif holders >= 30:
+            score -= 12
+            warnings.append(f"تركيز حيتان متوسط: أكبر 10 محافظ تملك {holders:.1f}%")
+        else:
+            score += 3
+            reasons.append(f"توزيع صحي للعرض: أكبر 10 محافظ تملك {holders:.1f}% فقط")
+
     return _result(max(0, min(100, score)), pair, base, quote, price, liq,
                    vol24, pc1h, pc24h, buys, sells, age_h, reasons, warnings,
-                   boosted=boosted, fdv=fdv)
+                   boosted=boosted, fdv=fdv, holders=holders)
 
 
 def _result(score, pair, base, quote, price, liq, vol24, pc1h, pc24h,
-            buys, sells, age_h, reasons, warnings, boosted=False, fdv=0):
+            buys, sells, age_h, reasons, warnings, boosted=False, fdv=0,
+            holders=None):
     return {
         "score": score,
         "signal": signal_of(score),
@@ -188,6 +207,7 @@ def _result(score, pair, base, quote, price, liq, vol24, pc1h, pc24h,
             "price": price, "liq": liq, "vol24": vol24, "fdv": fdv,
             "pc1h": pc1h, "pc24h": pc24h,
             "buys": buys, "sells": sells, "age_h": age_h,
+            "holders_top10": holders,
         },
     }
 

@@ -97,3 +97,16 @@ python main.py --dry-run
    `https://api.github.com/repos/sjob7652-byte/crypto-analyst/dispatches`
    → POST → Header: `Authorization: Bearer <GH_PAT>` →
    Body: `{"event_type":"scan"}`.
+
+
+## 📊 لوحة المراقبة الحية + 🐋 فحص الحيتان (v4)
+
+- **Dashboard على GitHub Pages** (`dashboard/index.html`): تعرض رصيد المحفظة الوهمية
+  والقيمة الإجمالية بأسعار حية (من Dexscreener مباشرة)، الصفقات المفتوحة بالألوان
+  (أخضر/أحمر)، ورسماً بيانياً لنسبة نجاح "ذاكرة الخبير" عبر الزمن.
+  تقرأ `state.json` مباشرة من الـGist السري عبر JavaScript — تحديث كل دقيقة.
+  الرابط بعد التفعيل: `https://sjob7652-byte.github.io/crypto-analyst/?gist=GIST_ID`
+- **فحص تركيز الحيتان (Solana)**: عبر التقرير الكامل لـRugCheck (مجاني بلا مفتاح).
+  أكبر 10 محافظ ≥50% → النقاط تُخفّض لـ10 كحد أقصى (خطر Dump) |
+  ≥40% → خصم 25 نقطة | ≥30% → خصم 12 نقطة | أقل → +3 نقاط توزيع صحي.
+- تفعيل Pages: Settings → Pages → Deploy from branch → `main` → مجلد `/dashboard`.

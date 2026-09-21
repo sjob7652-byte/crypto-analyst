@@ -145,7 +145,10 @@ def scan_new_coins(s, dry_run, ctx):
         addr = (p.get("baseToken") or {}).get("address")
         boosted = (chain, (addr or "").lower()) in boosted_set
         sec = clients.token_security(chain, addr) if addr else None
-        res = analyzer.analyze_pair(p, sec, boosted=boosted)
+        # 🐋 فحص تركيز الحيتان (Solana فقط — مجاني بلا مفتاح عبر RugCheck)
+        holders = (clients.solana_top10_pct(addr)
+                   if (chain == "solana" and addr) else None)
+        res = analyzer.analyze_pair(p, sec, boosted=boosted, holders=holders)
         res["id"] = f"dex:{chain}:{p.get('pairAddress')}"
         res["kind"] = "dex"
         res["chain"] = chain
@@ -212,7 +215,10 @@ def check_waitlist(s, dry_run, ctx):
             continue
         sec = clients.token_security(e["chain"],
                                       (p.get("baseToken") or {}).get("address"))
-        res = analyzer.analyze_pair(p, sec)
+        addr = (p.get("baseToken") or {}).get("address")
+        holders = (clients.solana_top10_pct(addr)
+                   if (e["chain"] == "solana" and addr) else None)
+        res = analyzer.analyze_pair(p, sec, holders=holders)
         res["id"] = wid
         res["kind"] = "dex"
         res["chain"] = e["chain"]

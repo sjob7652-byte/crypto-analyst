@@ -141,6 +141,28 @@ def _num(x):
         return 0.0
 
 
+def rugcheck_report(mint):
+    """التقرير الكامل من RugCheck (Solana): يتضمن topHolders بالنسب المئوية.
+    مجاني وبلا مفتاح — يُستخدم لفحص تركيز الحيتان."""
+    data = _get(f"{RUGCHECK_API}/v1/tokens/{mint}/report")
+    return data if isinstance(data, dict) else None
+
+
+def solana_top10_pct(mint):
+    """تركيز أكبر 10 حاملين كنسبة من العرض (%) — عملات Solana فقط.
+    يعيد None عند تعذّر الجلب (لا يُعاقب العملة على فشل الـAPI)."""
+    rep = rugcheck_report(mint)
+    try:
+        holders = (rep or {}).get("topHolders") or []
+        pcts = sorted((float(h.get("pct") or 0) for h in holders),
+                      reverse=True)
+        if not pcts:
+            return None
+        return round(sum(pcts[:10]), 2)
+    except Exception:
+        return None
+
+
 # ---------- Binance (بيانات عمومية) ----------
 def binance_ticker(symbol):
     return _get(f"{BINANCE_API}/api/v3/ticker/24hr", params={"symbol": symbol})
