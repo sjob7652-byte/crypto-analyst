@@ -76,3 +76,24 @@ python main.py --dry-run
 
 عملات الميم عالية المخاطر جداً. هذا البوت أداة تحليل مبنية على بيانات عمومية،
 وليست نصيحة مالية. لا تخاطر إلا بمبالغ صغيرة تتحمّل خسارتها كاملة.
+
+## ⏱️ الدقة والموثوقية (v3)
+
+- **تشغيل دقيق كل 5 دقائق**: `repository_dispatch` يُفعَّل عبر Webhook من
+  [cron-job.org](https://cron-job.org) (مجاني) → `POST /repos/{owner}/{repo}/dispatches`
+  مع `{"event_type":"scan"}` — بلا تأخر الـcron تاع GitHub.
+  الـ`schedule` كل 15 دقيقة باقي كاحتياطي فقط.
+- **الحالة في Gist سري** (`GH_PAT` + `GIST_ID` في Secrets): يعمل كقاعدة بيانات
+  NoSQL مجانية — لا يُمسح مثل الـcache. الملف المحلي + cache باقيين كاحتياطي.
+- **حماية من الحظر (429)**: كل طلبات HTTP ببصمة متصفح حقيقي + Exponential Backoff
+  (إعادة المحاولة بعد 3ث ثم 6ث عند الحظر المؤقت).
+- **جولة واحدة في المرة** (`concurrency`): منع تداخل الجولات حمايةً لحالة Gist.
+
+### إعداد cron-job.org (مرة واحدة)
+1. أنشئ Token في GitHub: Settings → Developer settings → Personal access tokens
+   (classic) بصلاحيتي `repo` و`gist` → احفظه في Secrets باسم `GH_PAT`.
+2. أنشئ Gist سري فيه ملف `state.json` بمحتوى `{}` → ضع معرفه في Secrets باسم `GIST_ID`.
+3. في cron-job.org: مهمة جديدة كل 5 دقائق → URL:
+   `https://api.github.com/repos/sjob7652-byte/crypto-analyst/dispatches`
+   → POST → Header: `Authorization: Bearer <GH_PAT>` →
+   Body: `{"event_type":"scan"}`.
