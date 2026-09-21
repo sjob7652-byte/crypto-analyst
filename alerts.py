@@ -150,6 +150,23 @@ def stop_loss_msg(name, entry, price):
     )
 
 
+def rug_pull_msg(name, entry, price, blacklisted=False):
+    """رسالة الانهيار المفاجئ — تُستعمل بدل وقف الخسارة العادي عندما
+    تتجاوز الخسارة 70% فجأة (يُرجح سحب سيولة)."""
+    loss = (1 - price / entry) * 100
+    bl = ("⛔ تمت إضافة العملة ومطورها إلى القائمة السوداء — "
+          "لن تصلك إشارات منه مجدداً.\n" if blacklisted else "")
+    return (
+        f"🚨 <b>انهيار مفاجئ / سحب سيولة — {html.escape(name)}</b>\n"
+        f"العملة انهارت فجأة (خسارة: -{loss:.1f}%). هذا ليس وقف خسارة "
+        f"فنياً — المؤشرات توحي بسحب سيولة (Rug Pull).\n"
+        f"دخلت بـ: {fmt_price(entry)} → الآن: {fmt_price(price)}\n"
+        f"{bl}"
+        f"💡 <b>درس:</b> العملات الجديدة جداً بسيولة ضعيفة هي الأخطر — "
+        f"التزم دائماً بمبلغ صغير تتحمل خسارته."
+    )
+
+
 def paper_closed_msg(name, pnl_usd, pnl_pct, reason, cash):
     """نتيجة إغلاق صفقة وهمية — تُرسل مرة واحدة عند الإغلاق فقط."""
     icon = "🟢" if pnl_usd >= 0 else "🔴"

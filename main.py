@@ -21,6 +21,52 @@ from config import (
     PAPER_SELL_FRACTIONS, PAPER_SLIPPAGE,
 )
 
+# عتبات الانهيار والقائمة السوداء
+RUG_ALERT_LOSS = 0.70      # خسارة ≥70% فجأة → رسالة "انهيار" بدل وقف الخسارة
+RUG_BLACKLIST_LOSS = 0.80  # خسارة ≥80% → العملة + مطورها إلى القائمة السوداء
+
+
+def _rug_store(s):
+    return s.setdefault("rug_blacklist", {})
+
+
+def blacklist_rug(s, pos, loss_pct):
+    """تسجيل عملة منهارة في القائمة السوداء مع عنوان مطورها (إن عُرف
+    عبر RugCheck) — أي عملة جديدة من نفس المطور تُحظر تلقائياً."""
+    key = (pos.get("mint") or "").lower() or (pos.get("symbol") or "")
+    if not key:
+        return False
+    bl = _rug_store(s)
+    if key in bl:
+        return True
+    dev = None
+    if pos.get("kind") == "dex" and pos.get("chain") == "solana" \
+            and pos.get("mint"):
+        dev = clients.rugcheck_creator(pos["mint"])
+    bl[key] = {"name": pos.get("name"), "dev": dev,
+               "time": time.time(), "loss": round(loss_pct * 100, 1)}
+    if dev:
+        devs = s.setdefault("rug_devs", [])
+        if dev not in devs:
+            devs.append(dev)
+    print(f"  -> ⛔ قائمة سوداء: {pos.get('name')} "
+          f"(مطور: {dev or 'غير معروف'})")
+    return True
+
+
+def is_blacklisted(s, mint=None, symbol=None, chain=None):
+    """هل العملة أو مطورها في القائمة السوداء؟"""
+    bl = s.get("rug_blacklist") or {}
+    if mint and mint.lower() in bl:
+        return True, "العملة مسجلة في القائمة السوداء (انهيار سابق)"
+    if symbol and symbol in bl:
+        return True, "العملة مسجلة في القائمة السوداء (انهيار سابق)"
+    if chain == "solana" and mint:
+        dev = clients.rugcheck_creator(mint)
+        if dev and dev in (s.get("rug_devs") or []):
+            return True, "مطور العملة في القائمة السوداء (سجل انهيارات)"
+    return False, None
+
 
 def build_context(s):
     """سياق الخبير: الأخبار الموثوقة + العملات الرائجة + نبض مُتحقق + ذاكرة النتائج."""
@@ -153,6 +199,7 @@ def scan_new_coins(s, dry_run, ctx):
         res["kind"] = "dex"
         res["chain"] = chain
         res["pair"] = p.get("pairAddress")
+        res["mint"] = addr
         results.append(res)
 
     results.sort(key=lambda r: r["score"], reverse=True)
@@ -163,6 +210,11 @@ def scan_new_coins(s, dry_run, ctx):
         if time.time() - s["alerted"].get(key, 0) < 24 * 3600:
             continue
         if res["signal"] in ("BUY", "STRONG_BUY") and sent < 5:
+            bad, why = is_blacklisted(s, mint=res.get("mint"),
+                                      chain=res.get("chain"))
+            if bad:
+                print(f"  -> ⛔ محظورة (قائمة سوداء): {res['display']} — {why}")
+                continue
             verdict = make_verdict(res, ctx)
             print(f"  -> إشارة {res['signal']}: {res['display']} "
                   f"({res['score']}) نجاح~{verdict['prob']}%")
@@ -223,7 +275,13 @@ def check_waitlist(s, dry_run, ctx):
         res["kind"] = "dex"
         res["chain"] = e["chain"]
         res["pair"] = e["pair"]
+        res["mint"] = addr
         if res["signal"] in ("BUY", "STRONG_BUY"):
+            bad, why = is_blacklisted(s, mint=addr, chain=e["chain"])
+            if bad:
+                print(f"  -> ⛔ محظورة (قائمة سوداء): {res['display']} — {why}")
+                wl.pop(wid, None)
+                continue
             verdict = make_verdict(res, ctx)
             print(f"  -> 🔄 تحسّنت: {res['display']} ({res['score']}) "
                   f"نجاح~{verdict['prob']}%")
@@ -254,6 +312,7 @@ def open_position(s, res, verdict=None):
         "chain": res.get("chain"),
         "pair": res.get("pair"),
         "symbol": res.get("symbol"),
+        "mint": res.get("mint"),
         "entry": price,
         "entry_time": time.time(),
         "tp_hit": [False] * len(TAKE_PROFITS),
@@ -292,6 +351,7 @@ def paper_buy(s, res, verdict=None):
         "chain": res.get("chain"),
         "pair": res.get("pair"),
         "symbol": res.get("symbol"),
+        "mint": res.get("mint"),
         "entry": eff_entry,
         "entry_time": time.time(),
         "qty": amount / eff_entry,
@@ -345,17 +405,24 @@ def update_paper(s, dry_run):
         if pid in closed:
             continue
         # وقف الخسارة: بيع كل الكمية المتبقية
+        # (خسارة ≥70% فجأة → "انهيار" Rug Pull بدل وقف الخسارة العادي)
         if price <= entry * (1 - STOP_LOSS):
+            loss = 1 - price / entry
             proceeds = pos["qty"] * eff_price
             pnl = proceeds - pos["qty"] * entry + pos["realized"]
             p["cash"] += proceeds
             p["losses"] += 1
             closed.append(pid)
-            print(f"  -> وهمي: وقف خسارة {pos['name']} (${pnl:+.2f})")
+            rug = loss >= RUG_ALERT_LOSS
+            if rug and loss >= RUG_BLACKLIST_LOSS:
+                blacklist_rug(s, pos, loss)
+            reason = "🚨 انهيار مفاجئ (Rug Pull)" if rug else "وقف الخسارة 🛑"
+            print(f"  -> وهمي: {'انهيار' if rug else 'وقف خسارة'} "
+                  f"{pos['name']} (${pnl:+.2f})")
             alerts.send(alerts.paper_closed_msg(
                 pos["name"], pnl,
                 pnl / pos["invested"] * 100 if pos["invested"] else 0,
-                "وقف الخسارة 🛑", p["cash"]), dry_run)
+                reason, p["cash"]), dry_run)
             continue
         # انتهاء مدة المتابعة: بيع بسعر السوق
         if time.time() - pos["entry_time"] > POSITION_MAX_AGE_DAYS * 86400:
@@ -430,11 +497,22 @@ def update_positions(s, dry_run):
                 break
         if pid in closed:
             continue
-        # وقف الخسارة
+        # وقف الخسارة — أو "انهيار مفاجئ" إن تجاوزت الخسارة 70% فجأة
+        # (يُرجح سحب سيولة، فيُسجل كنوع مستقل "rug" بدل "sl")
         if price <= entry * (1 - STOP_LOSS):
-            print(f"  -> وقف الخسارة: {pos['name']}")
-            alerts.send(alerts.stop_loss_msg(pos["name"], entry, price), dry_run)
-            st.record_outcome(s, pos, "sl")
+            loss = 1 - price / entry
+            if loss >= RUG_ALERT_LOSS:
+                blacklisted = (blacklist_rug(s, pos, loss)
+                               if loss >= RUG_BLACKLIST_LOSS else False)
+                print(f"  -> 🚨 انهيار: {pos['name']} (-{loss * 100:.1f}%)")
+                alerts.send(alerts.rug_pull_msg(pos["name"], entry, price,
+                                                blacklisted), dry_run)
+                st.record_outcome(s, pos, "rug")
+            else:
+                print(f"  -> وقف الخسارة: {pos['name']}")
+                alerts.send(alerts.stop_loss_msg(pos["name"], entry, price),
+                            dry_run)
+                st.record_outcome(s, pos, "sl")
             closed.append(pid)
             continue
         # تحذير انهيار السيولة
@@ -505,6 +583,10 @@ def scan_watchlist(s, dry_run, ctx):
             res["id"] = f"binance:{sym}"
             res["kind"] = "binance"
             res["symbol"] = sym
+            bad, why = is_blacklisted(s, symbol=sym)
+            if bad:
+                print(f"  -> ⛔ محظورة (قائمة سوداء): {res['display']} — {why}")
+                continue
             verdict = make_verdict(res, ctx)
             print(f"  -> إشارة {res['signal']}: {res['display']} "
                   f"({res['score']}) نجاح~{verdict['prob']}%")

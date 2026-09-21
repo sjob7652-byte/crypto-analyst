@@ -163,6 +163,17 @@ def solana_top10_pct(mint):
         return None
 
 
+def rugcheck_creator(mint):
+    """عنوان مطور العملة (Solana) من تقرير RugCheck — مجاني وبلا مفتاح.
+    يعيد None عند تعذّر الجلب أو عدم توفر المعلومة (لا يُعاقب العملة)."""
+    rep = rugcheck_report(mint)
+    try:
+        c = (rep or {}).get("creator")
+        return c if c else None
+    except Exception:
+        return None
+
+
 # ---------- Binance (بيانات عمومية) ----------
 def binance_ticker(symbol):
     return _get(f"{BINANCE_API}/api/v3/ticker/24hr", params={"symbol": symbol})

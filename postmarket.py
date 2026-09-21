@@ -36,9 +36,10 @@ DAY = 24 * 3600
 
 # عائد تقديري لكل نتيجة (على صفقة وهمية) — بعد خصم الانزلاق تقريباً
 OUTCOME_PCT = {"tp1": 0.24, "tp2": 0.62, "tp3": 1.38, "sl": -0.28,
-               "expired": 0.0}
+               "rug": -0.90, "expired": 0.0}
 OUTCOME_AR = {"tp1": "الهدف 1", "tp2": "الهدف 2", "tp3": "الهدف 3",
-              "sl": "وقف الخسارة", "expired": "انتهت المدة"}
+              "sl": "وقف الخسارة", "rug": "سحب سيولة 🧨",
+              "expired": "انتهت المدة"}
 
 
 # ---------- جمع البيانات ----------
@@ -80,7 +81,7 @@ def btc_24h_change():
 # ---------- التحليل الحتمي ----------
 
 def analyze(trades):
-    a = {"n": len(trades), "wins": 0, "sl": 0, "expired": 0,
+    a = {"n": len(trades), "wins": 0, "sl": 0, "rug": 0, "expired": 0,
          "by_outcome": {}, "by_kind": {}, "by_band": {},
          "by_hour": {}, "scores_win": [], "scores_loss": [],
          "pnl_est": 0.0, "names": []}
@@ -115,6 +116,8 @@ def analyze(trades):
         else:
             if oc == "sl":
                 a["sl"] += 1
+            elif oc == "rug":
+                a["rug"] += 1
             elif oc == "expired":
                 a["expired"] += 1
             if isinstance(sc, (int, float)):
@@ -176,6 +179,9 @@ def deterministic_insights(a, btc_chg):
         elif btc_chg >= 3 and wr < 40:
             ins.append(f"البيتكوين صعد ({btc_chg:+.1f}%) لكن الإشارات فشلت — "
                        f"المشكلة في اختيار العملات لا في السوق العام.")
+    if a["rug"] >= 1:
+        ins.append(f"🧨 {a['rug']} حالة سحب سيولة اليوم — تمت إضافة العملات "
+                   f"ومطوريها للقائمة السوداء تلقائياً ولن تصلك إشارات منهم.")
     if n < 6:
         ins.append("ملاحظة: العينة صغيرة اليوم — لا تبنِ قواعد صارمة "
                    "على بضع صفقات.")
@@ -220,7 +226,7 @@ def build_report(a, btc_chg, ai_text, day_label):
         "━━━━━━━━━━━━",
         f"📊 صفقات مغلقة (24h): <b>{n}</b>",
         f"✅ رابحة: {a['wins']} ({wr:.0f}%)  |  🛑 وقف خسارة: {a['sl']}  |  "
-        f"⌛ انتهت: {a['expired']}",
+        f"🧨 سحب سيولة: {a['rug']}  |  ⌛ انتهت: {a['expired']}",
         f"💰 الربح/الخسارة التقديري (محفظة وهمية $10/صفقة): <b>{pnl_s}</b>",
     ]
     if btc_chg is not None:
@@ -272,7 +278,7 @@ def main():
 
     parts = [
         f"صفقات مغلقة: {a['n']}، فوز: {a['wins']} ({a['win_rate']:.0f}%)، "
-        f"وقف خسارة: {a['sl']}",
+        f"وقف خسارة: {a['sl']}، سحب سيولة: {a['rug']}",
         "حسب النوع: " + (", ".join(
             f"{k}: {d['w']}/{d['n']}" for k, d in a["by_kind"].items())
             or "لا يوجد"),

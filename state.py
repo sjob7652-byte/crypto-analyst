@@ -118,7 +118,8 @@ def save(s):
 
 
 # ---------- ذاكرة الخبير: نتائج الإشارات السابقة ----------
-# outcome: tp1 / tp2 / tp3 (وصل لهدف) | sl (ضرب وقف الخسارة) | expired (انتهت المدة)
+# outcome: tp1 / tp2 / tp3 (وصل لهدف) | sl (ضرب وقف الخسارة) |
+#          rug (انهيار مفاجئ ≥70% — سحب سيولة محتمل) | expired (انتهت المدة)
 def record_outcome(s, pos, outcome):
     h = s.setdefault("history", [])
     h.append({
