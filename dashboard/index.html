@@ -55,6 +55,9 @@
   .flash { animation: flash 1.2s; }
   @keyframes flash { 0% { background: rgba(59,130,246,.18); } 100% { background: transparent; } }
   .chip { font-size: .68rem; padding: .15rem .55rem; border-radius: 9999px; background: rgba(255,255,255,.07); }
+  .ftab { cursor: pointer; transition: all .15s; }
+  .ftab:hover { background: rgba(255,255,255,.14); }
+  .ftab.active { background: linear-gradient(135deg, #2563eb, #7c3aed); color: #fff; box-shadow: 0 4px 14px rgba(59,130,246,.35); }
   .btn-chart {
     display: inline-flex; align-items: center; gap: .35rem;
     background: linear-gradient(135deg, #2563eb, #7c3aed);
@@ -94,6 +97,26 @@
   </div>
 
   <div id="dash" class="hidden">
+    <!-- شريط مزاج السوق -->
+    <section class="glass px-4 py-3 mb-5 flex items-center gap-4 flex-wrap">
+      <div class="flex items-center gap-2 text-xs text-slate-400 whitespace-nowrap">
+        <i data-lucide="gauge" class="w-4 h-4 text-amber-400"></i> مزاج السوق
+      </div>
+      <div class="flex items-center gap-2 text-sm font-bold whitespace-nowrap">
+        <span id="fng-val" dir="ltr">—</span><span id="fng-label" class="chip"></span>
+      </div>
+      <div class="flex-1 min-w-[120px] relative">
+        <div class="h-2 rounded-full" style="background:linear-gradient(90deg,#f87171,#fbbf24,#a3e635,#4ade80)"></div>
+        <div id="fng-marker" style="position:absolute;top:0;right:50%;width:0;height:0">
+          <div style="position:absolute;top:-11px;right:-6px;width:12px;height:12px;border-radius:9999px;background:#fff;border:2px solid #0f172a"></div>
+        </div>
+      </div>
+      <div class="flex items-center gap-2 text-sm whitespace-nowrap">
+        <i data-lucide="bitcoin" class="w-4 h-4 text-orange-400"></i>
+        <span id="btc-price" dir="ltr">—</span><span id="btc-chg" class="font-bold">—</span>
+      </div>
+    </section>
+
     <!-- البطل: القيمة الإجمالية -->
     <section class="glass p-6 mb-5 text-center relative overflow-hidden">
       <div class="text-xs text-slate-400 mb-1 flex items-center justify-center gap-2">
@@ -121,6 +144,11 @@
     <!-- الصفقات المفتوحة -->
     <section class="mb-5">
       <h2 class="font-extrabold mb-3 flex items-center gap-2"><i data-lucide="layers" class="w-5 h-5 text-emerald-400"></i> الصفقات المفتوحة <span id="t-count" class="chip"></span></h2>
+      <div class="flex gap-2 mb-3" id="filter-tabs">
+        <button data-f="all" class="ftab active chip !text-xs !py-1.5 !px-4 font-bold">الكل <span id="fc-all"></span></button>
+        <button data-f="win" class="ftab chip !text-xs !py-1.5 !px-4 font-bold">الرابحة <span id="fc-win" class="pos"></span></button>
+        <button data-f="loss" class="ftab chip !text-xs !py-1.5 !px-4 font-bold">الخاسرة <span id="fc-loss" class="neg"></span></button>
+      </div>
       <div id="t-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <div class="skel h-44"></div><div class="skel h-44"></div><div class="skel h-44"></div>
       </div>
@@ -152,6 +180,9 @@ let chart = null;
 const FALLBACK_COIN = "data:image/svg+xml," + encodeURIComponent(
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="#1f2633"/><text x="24" y="30" font-size="20" text-anchor="middle" fill="#64748b">◉</text></svg>`);
 
+let currentCards = [];
+let activeFilter = "all";
+
 function logoFor(t) {
   if (t.kind === "dex" && t.mint && t.chain)
     return `https://dd.dexscreener.com/ds-data/tokens/${t.chain}/${t.mint}.png`;
@@ -179,7 +210,86 @@ async function dexPrice(chain, pair) {
   } catch { return null; }
 }
 
+// مزاج السوق: الخوف والطمع + البيتكوين (مصادر عامة مجانية)
+async function loadSentiment() {
+  try {
+    const r = await fetch("https://api.alternative.me/fng/?limit=1", {cache: "no-store"});
+    const j = await r.json();
+    const v = parseInt(((j.data || [])[0] || {}).value);
+    if (!isNaN(v)) {
+      $("fng-val").textContent = v + "/100";
+      const [label, color] = v <= 24 ? ["خوف شديد", "#f87171"]
+        : v <= 44 ? ["خوف", "#fb923c"]
+        : v <= 55 ? ["محايد", "#facc15"]
+        : v <= 74 ? ["طمع", "#a3e635"]
+        : ["طمع شديد", "#4ade80"];
+      const l = $("fng-label");
+      l.textContent = label; l.style.color = color;
+      $("fng-marker").style.right = v + "%";
+    }
+  } catch {}
+  try {
+    const r = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true", {cache: "no-store"});
+    const j = await r.json();
+    const b = j.bitcoin;
+    if (b && b.usd) {
+      $("btc-price").textContent = "$" + Number(b.usd).toLocaleString("en-US");
+      const chg = b.usd_24h_change || 0;
+      const e = $("btc-chg");
+      e.textContent = (chg >= 0 ? "+" : "") + chg.toFixed(1) + "%";
+      e.className = "font-bold " + (chg >= 0 ? "pos" : "neg");
+    }
+  } catch {}
+}
+
+// فلترة الصفقات: الكل / الرابحة / الخاسرة
+function renderCards(list) {
+  if (!list.length) {
+    const msg = activeFilter === "win" ? "لا توجد صفقات رابحة حالياً"
+      : activeFilter === "loss" ? "لا توجد صفقات خاسرة — ممتاز! 🎉"
+      : "لا توجد صفقات مفتوحة حالياً";
+    $("t-grid").innerHTML = `<div class="glass p-8 text-center text-slate-500 col-span-full">${msg}</div>`;
+  } else {
+    $("t-grid").innerHTML = list.map(({id, t, live, px, pnl}) => {
+      const cls = pnl >= 0 ? "pos" : "neg";
+      const cu = chartUrl(t);
+      const kindChip = t.kind === "binance"
+        ? `<span class="chip">Binance</span>`
+        : `<span class="chip">DEX · ${t.chain || ""}</span>`;
+      return `<div id="trade-${slug(id)}" class="trade-card glass flash p-4">
+        <div class="flex items-center gap-3 mb-3">
+          <img src="${logoFor(t)}" alt="" class="w-11 h-11 rounded-full bg-white/5"
+               onerror="this.onerror=null;this.src='${FALLBACK_COIN}'">
+          <div class="flex-1 min-w-0">
+            <div class="font-extrabold truncate">${t.name || id}</div>
+            <div class="flex gap-1 mt-1">${kindChip}</div>
+          </div>
+        </div>
+        <div class="text-3xl font-black ${cls} mb-2" dir="ltr">${pnl >= 0 ? "+" : ""}${pnl.toFixed(1)}%</div>
+        <div class="text-xs text-slate-400 space-y-1 mb-3" dir="ltr">
+          <div class="flex justify-between"><span>Entry</span><span class="text-slate-200">${Number(t.entry).toPrecision(4)}</span></div>
+          <div class="flex justify-between"><span>Live</span><span class="text-slate-200">${live ? Number(live).toPrecision(4) : "—"}</span></div>
+          <div class="flex justify-between"><span>Invested</span><span class="text-slate-200">${fmt$(t.invested || 0)}</span></div>
+        </div>
+        ${cu ? `<a class="btn-chart text-white" target="_blank" rel="noopener" href="${cu}"><i data-lucide="candlestick-chart" class="w-4 h-4"></i> الشارت</a>` : ""}
+      </div>`;
+    }).join("");
+  }
+  if (window.lucide) lucide.createIcons();
+}
+
+function applyFilter(f) {
+  activeFilter = f;
+  document.querySelectorAll(".ftab").forEach(x => x.classList.toggle("active", x.dataset.f === f));
+  const list = f === "win" ? currentCards.filter(c => c.pnl >= 0)
+    : f === "loss" ? currentCards.filter(c => c.pnl < 0)
+    : currentCards;
+  renderCards(list);
+}
+
 async function load() {
+  loadSentiment();
+  if (!GIST_ID) { $("setup").classList.remove("hidden"); return; }
   if (!GIST_ID) { $("setup").classList.remove("hidden"); return; }
   $("setup").classList.add("hidden");
   $("sync-hint").textContent = "جارٍ الجلب…";
@@ -237,38 +347,14 @@ async function render(s) {
   $("s-sig").textContent = Object.keys(s.alerted || {}).length;
   $("s-pos").textContent = Object.keys(s.positions || {}).length;
 
-  // بطاقات الصفقات
+  // بطاقات الصفقات + الفلاتر
   $("t-count").textContent = ids.length ? ids.length + " مفتوحة" : "";
-  if (!cards.length) {
-    $("t-grid").innerHTML = `<div class="glass p-8 text-center text-slate-500 col-span-full">لا توجد صفقات مفتوحة حالياً</div>`;
-  } else {
-    cards.sort((a, b) => ((b.px - b.t.entry) / b.t.entry) - ((a.px - a.t.entry) / a.t.entry));
-    $("t-grid").innerHTML = cards.map(({id, t, live, px}) => {
-      const pnlT = (px - t.entry) / t.entry * 100;
-      const cls = pnlT >= 0 ? "pos" : "neg";
-      const cu = chartUrl(t);
-      const kindChip = t.kind === "binance"
-        ? `<span class="chip">Binance</span>`
-        : `<span class="chip">DEX · ${t.chain || ""}</span>`;
-      return `<div id="trade-${slug(id)}" class="trade-card glass flash p-4">
-        <div class="flex items-center gap-3 mb-3">
-          <img src="${logoFor(t)}" alt="" class="w-11 h-11 rounded-full bg-white/5"
-               onerror="this.onerror=null;this.src='${FALLBACK_COIN}'">
-          <div class="flex-1 min-w-0">
-            <div class="font-extrabold truncate">${t.name || id}</div>
-            <div class="flex gap-1 mt-1">${kindChip}</div>
-          </div>
-        </div>
-        <div class="text-3xl font-black ${cls} mb-2" dir="ltr">${pnlT >= 0 ? "+" : ""}${pnlT.toFixed(1)}%</div>
-        <div class="text-xs text-slate-400 space-y-1 mb-3" dir="ltr">
-          <div class="flex justify-between"><span>Entry</span><span class="text-slate-200">${Number(t.entry).toPrecision(4)}</span></div>
-          <div class="flex justify-between"><span>Live</span><span class="text-slate-200">${live ? Number(live).toPrecision(4) : "—"}</span></div>
-          <div class="flex justify-between"><span>Invested</span><span class="text-slate-200">${fmt$(t.invested || 0)}</span></div>
-        </div>
-        ${cu ? `<a class="btn-chart text-white" target="_blank" rel="noopener" href="${cu}"><i data-lucide="candlestick-chart" class="w-4 h-4"></i> الشارت</a>` : ""}
-      </div>`;
-    }).join("");
-  }
+  currentCards = cards.map(c => ({...c, pnl: (c.px - c.t.entry) / c.t.entry * 100}));
+  currentCards.sort((a, b) => b.pnl - a.pnl);
+  $("fc-all").textContent = currentCards.length || "";
+  $("fc-win").textContent = currentCards.filter(c => c.pnl >= 0).length || "";
+  $("fc-loss").textContent = currentCards.filter(c => c.pnl < 0).length || "";
+  applyFilter(activeFilter);
 
   // الرسم البياني: نجاح يومي
   const days = {};
@@ -291,6 +377,7 @@ async function render(s) {
 }
 
 $("refresh").onclick = load;
+document.querySelectorAll(".ftab").forEach(b => b.onclick = () => applyFilter(b.dataset.f));
 setInterval(load, 60000);
 load();
 if (window.lucide) lucide.createIcons();
