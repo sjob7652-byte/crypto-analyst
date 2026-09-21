@@ -156,7 +156,8 @@ def decide(res, coin_news, btc_chg, band_stats, fng=None, macro_verified=True,
     if macro_verified and btc_chg is not None and btc_chg <= -5:
         prob -= 8
 
-    # 2ب) مؤشر الخوف والطمع: التطرف في أي اتجاه = مخاطرة أعلى    fng_v = None
+    # 2ب) مؤشر الخوف والطمع: التطرف في أي اتجاه = مخاطرة أعلى
+    fng_v = None
     if isinstance(fng, dict):
         fng_v = fng.get("value")
     elif isinstance(fng, (int, float)):
