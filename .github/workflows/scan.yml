@@ -48,6 +48,11 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GH_PAT: ${{ secrets.GH_PAT }}
           GIST_ID: ${{ secrets.GIST_ID }}
+          # جسر أخبار X عبر Telegram (اختياري — يُتجاهل بصمت إن لم توجد الأسرار)
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          TG_SESSION: ${{ secrets.TG_SESSION }}
+          XBRIDGE_CHANNELS: ${{ secrets.XBRIDGE_CHANNELS }}
 
       - name: حفظ الحالة في الـcache للجولة القادمة
         uses: actions/cache/save@v4
