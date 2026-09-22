@@ -176,6 +176,14 @@
       </div>
     </section>
 
+    <!-- آخر التنبيهات — الداشبورد "ينصت": نفس الأحداث المُرسلة إلى Telegram -->
+    <section class="mb-5">
+      <h2 class="font-extrabold mb-3 flex items-center gap-2"><i data-lucide="bell" class="w-5 h-5 text-amber-400"></i> آخر التنبيهات <span class="text-[11px] text-slate-500 font-normal">نفس ما يصل Telegram — عبر البيانات مباشرة</span></h2>
+      <div id="a-list" class="space-y-2">
+        <div class="skel h-16"></div>
+      </div>
+    </section>
+
     <!-- ذاكرة الخبير -->
     <section class="mb-5">
       <h2 class="font-extrabold mb-3 flex items-center gap-2"><i data-lucide="line-chart" class="w-5 h-5 text-violet-400"></i> ذاكرة الخبير عبر الزمن</h2>
@@ -295,6 +303,10 @@ function renderCards(list) {
       const partialChip = isBE
         ? `<div class="mb-2 text-[11px] font-bold text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-2 py-1" dir="rtl">🎯 جني 50% | SL @ الدخول — مؤمنة (Risk-Free) 🛡️ · ربح مُحقق ${((t.realized || 0) >= 0 ? "+" : "") + fmt$((t.realized || 0))} · المتبقي ${remPct}%</div>`
         : "";
+      // تحذير انهيار السيولة: نفس تنبيه 🚨 المُرسل إلى Telegram — ظاهر هنا أيضاً
+      const warnChip = t.warned
+        ? `<div class="mb-2 text-[11px] font-bold text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg px-2 py-1" dir="rtl">🚨 خطر! السيولة تنهار أو مشكلة في العقد — راجع التنبيه</div>`
+        : "";
       return `<div id="trade-${slug(id)}" class="trade-card glass flash p-4">
         <div class="flex items-center gap-3 mb-3">
           <img src="${logoFor(t)}" alt="" class="w-11 h-11 rounded-full bg-white/5"
@@ -305,6 +317,7 @@ function renderCards(list) {
           </div>
         </div>
         ${partialChip}
+        ${warnChip}
         <div class="text-3xl font-black ${cls} mb-2" dir="ltr">${pnl >= 0 ? "+" : ""}${pnl.toFixed(1)}%</div>
         <div class="text-xs text-slate-400 space-y-1 mb-3" dir="ltr">
           <div class="flex justify-between"><span>Entry</span><span class="text-slate-200">${Number(t.entry).toPrecision(4)}</span></div>
@@ -418,7 +431,48 @@ async function render(s) {
   // سجل الصفقات المغلقة (الأرشيف التاريخي)
   renderClosed(p.closed_trades || []);
 
+  // آخر التنبيهات — "إنصات" الداشبورد: نفس أحداث Telegram من البيانات
+  renderAlerts(s.alert_log || []);
+
   if (window.lucide) lucide.createIcons();
+}
+
+const ALERT_KIND = {
+  danger: "🚨 خطر",
+  breakeven: "⚖️ تعادل",
+  wallet: "💼 محفظة",
+  takeprofit: "🎯 جني",
+  stoploss: "🛑 وقف",
+  avoid: "⛔ مرفوضة",
+  buy: "🟢 شراء",
+  warn: "⚠️ تحذير",
+  digest: "📊 ملخص",
+  info: "🔔 تنبيه",
+};
+
+function escHtml(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function renderAlerts(log) {
+  const el = $("a-list");
+  if (!log.length) {
+    el.innerHTML = `<div class="glass p-6 text-center text-slate-500">لا تنبيهات بعد — ستظهر هنا نفس رسائل Telegram من أول Run</div>`;
+    return;
+  }
+  el.innerHTML = [...log].reverse().map(a => {
+    const label = ALERT_KIND[a.kind] || ALERT_KIND.info;
+    const ts = a.t ? fmtTS(a.t) : "—";
+    return `<div class="glass p-3">
+      <div class="flex items-center justify-between gap-2 mb-1">
+        <span class="chip shrink-0">${label}</span>
+        <span class="text-[11px] text-slate-500 font-mono" dir="ltr">${ts}</span>
+      </div>
+      <div class="text-sm text-slate-200 leading-relaxed whitespace-pre-line">${escHtml(a.text)}</div>
+    </div>`;
+  }).join("");
 }
 
 const REASON_LABEL = {
@@ -478,23 +532,28 @@ function renderClosedList(list) {
     $("c-list").innerHTML = `<div class="glass p-6 text-center text-slate-500">لا توجد صفقات في هذه الفترة</div>`;
     return;
   }
-  const total = list.reduce((a, t) => a + (t.pnl || 0), 0);
-  const wins = list.filter(t => (t.pnl || 0) > 0).length;
-  const wr = Math.round(100 * wins / list.length);
+  const total = list.filter(t => !(t.partial || t.reason === "TP1"))
+                    .reduce((a, t) => a + (t.pnl || 0), 0);
+  const wins = list.filter(t => !(t.partial || t.reason === "TP1") && (t.pnl || 0) > 0).length;
+  const closedN = list.filter(t => !(t.partial || t.reason === "TP1")).length;
+  const wr = closedN ? Math.round(100 * wins / closedN) : 0;
   const pnlEl = $("c-pnl");
   pnlEl.textContent = `${total >= 0 ? "+" : ""}$${total.toFixed(2)}`;
   pnlEl.className = "font-black text-xl " + (total >= 0 ? "pos" : "neg");
   const winEl = $("c-win");
   winEl.textContent = wr + "%";
   winEl.className = "font-extrabold text-xl " + (wr >= 50 ? "pos" : "neg");
-  $("c-n").textContent = list.length;
+  $("c-n").textContent = closedN;
   const rows = [...list].reverse().map(t => {
     const pnl = t.pnl || 0, cls = pnl >= 0 ? "pos" : "neg";
     const reason = REASON_LABEL[t.reason] || t.reason || "—";
+    const isPartial = t.partial || t.reason === "TP1";
+    const partialTag = isPartial
+      ? `<span class="chip" title="حدث جزئي — مستثنى من مجاميع الربح والنجاح">جزئي</span>` : "";
     return `<div class="glass p-3">
       <div class="flex items-center justify-between gap-2 mb-1">
         <div class="font-extrabold truncate">${t.name || "—"}</div>
-        <span class="chip shrink-0">${reason}</span>
+        <span class="shrink-0 flex gap-1"><span class="chip">${reason}</span>${partialTag}</span>
       </div>
       <div class="text-[11px] text-slate-500 mb-2 font-mono" dir="ltr">${fmtTS(t.close_time)}</div>
       <div class="flex items-end justify-between gap-2">
