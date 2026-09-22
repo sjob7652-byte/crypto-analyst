@@ -3,6 +3,7 @@
 """المشغّل الرئيسي: فحص العملات الجديدة → تحليل → تنبيه → متابعة الصفقات."""
 import argparse
 import html
+import re
 import time
 from datetime import datetime, timezone
 
@@ -437,12 +438,16 @@ def paper_buy(s, res, verdict=None):
     return True
 
 
-def _archive_closed(p, pos, exit_price, pnl, reason, invested_override=None):
+def _archive_closed(p, pos, exit_price, pnl, reason, invested_override=None,
+                   partial=False):
     """ينقل الصفقة المغلقة إلى الأرشيف مع كل تفاصيلها — لا تُحذف أبداً.
     reason: TP1 (جني جزئي 50%) | BE (تعادل: خروج عند الدخول بعد الجني) |
             TP (اكتمال الأهداف) | SL (وقف الخسارة) | RUG (انهيار) |
             EXPIRED (انتهاء المدة).
-    invested_override: للجني الجزئي — تُحسب النسبة على الجزء المُباع فقط."""
+    invested_override: للجني الجزئي — تُحسب النسبة على الجزء المُباع فقط.
+    partial=True: حدث جزئي (جني TP1) — الداشبورد يعرضه لكنه يستثنيه من
+    مجاميع الربح ونسبة النجاح، لأن الإغلاق النهائي يحسب الربح الكلي
+    (متضمناً المحقق) في سجل واحد. بدون هذا يُحتسب ربح TP1 مرتين."""
     inv = invested_override if invested_override else (pos.get("invested") or 0)
     rec = {
         "name": pos.get("name"),
@@ -455,6 +460,7 @@ def _archive_closed(p, pos, exit_price, pnl, reason, invested_override=None):
         "pnl": round(pnl, 2),
         "pnl_pct": round(pnl / inv * 100, 2) if inv else 0.0,
         "reason": reason,
+        "partial": bool(partial),
         "entry_time": pos.get("entry_time"),
         "close_time": time.time(),
     }
@@ -498,9 +504,11 @@ def update_paper(s, dry_run):
                 p["cash"] += proceeds
                 print(f"  -> وهمي: جني جزئي 50% {pos['name']} "
                       f"(+${part_pnl:.2f} محقق) — وقف الخسارة → الدخول")
-                # أرشفة الجني الجزئي كحدث مستقل
+                # أرشفة الجني الجزئي كحدث مستقل (partial: يُستثنى من مجاميع
+                # الربح/النجاح في الداشبورد — الإغلاق النهائي يحسب الكل)
                 _archive_closed(p, pos, eff_price, part_pnl, "TP1",
-                                invested_override=sell_qty * entry)
+                                invested_override=sell_qty * entry,
+                                partial=True)
                 # جني جزئي حقيقي: نُعلن البيع الفعلي لا مجرد نصيحة
                 orig_qty = pos["invested"] / entry if entry else 0
                 remaining_pct = (pos["qty"] / orig_qty * 100
@@ -788,8 +796,27 @@ def main():
         raise  # يفشل الـworkflow بعلامة حمراء — وضوح كامل
 
 
+def _plain(text):
+    """نص التنبيه بصيغة بسيطة للداشبورد (إزالة وسوم HTML الخاصة بـTelegram)."""
+    t = re.sub(r"<[^>]+>", "", text or "")
+    return html.unescape(" ".join(t.split()))
+
+
+def _log_alert(s, kind, text):
+    """سجل التنبيهات في الحالة — الداشبورد يعرضه عبر الـGist.
+    هكذا 'ينصت' الداشبورد لكل تنبيه يرسله البوت دون قراءة Telegram."""
+    log = s.setdefault("alert_log", [])
+    log.append({"t": time.time(), "kind": kind or "info",
+                "text": _plain(text)[:300]})
+    # حد أقصى: أحدث 40 تنبيهاً — لمنع تضخم الـGist
+    if len(log) > 40:
+        del log[:len(log) - 40]
+
+
 def _run(a):
     s = st.load()
+    # الداشبورد ينصت: كل alerts.send يُسجل في الحالة → يُعرض في الداشبورد
+    alerts.LOG_HOOK = lambda kind, text: _log_alert(s, kind, text)
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     if s["stats"].get("day") != today:
         s["stats"] = {"day": today, "signals_today": 0}
