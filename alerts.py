@@ -29,6 +29,35 @@ def wallet_link(res):
 # في بداية كل استدعاء لاحق — لا تضيع تنبيهات الانهيار في صمت
 _PENDING = []
 
+# خطاف سجل التنبيهات: يضبطه main.py ليحفظ كل تنبيه في الحالة (state)
+# فيُعرض في الداشبورد — هكذا "ينصت" الداشبورد لكل ما يُرسل إلى Telegram
+# دون أن يقرأ Telegram نفسه (الاتجاه: البوت → Gist → الداشبورد).
+LOG_HOOK = None
+
+
+def _kind_of(text):
+    """تصنيف التنبيه من إيموجي البداية — للعرض في الداشبورد فقط."""
+    t = (text or "").lstrip()
+    if t.startswith("🚨"):
+        return "danger"
+    if t.startswith("⚖️"):
+        return "breakeven"
+    if t.startswith("💼"):
+        return "wallet"
+    if t.startswith("🎯"):
+        return "takeprofit"
+    if t.startswith("🛑"):
+        return "stoploss"
+    if t.startswith("🔴") or t.startswith("⛔"):
+        return "avoid"
+    if t.startswith("🟢") or t.startswith("🚀"):
+        return "buy"
+    if t.startswith("⚠️"):
+        return "warn"
+    if t.startswith("📊") or t.startswith("📰"):
+        return "digest"
+    return "info"
+
 
 def _post_message(token, chat, text):
     """محاولة إرسال واحدة. تعيد (نجح؟, يستحق_إعادة؟)."""
@@ -75,6 +104,13 @@ def send(text, dry_run=False):
         print(text)
         print("—" * 45)
         return True
+    # سجل التنبيهات: الداشبورد "ينصت" عبر الـGist — يُسجل القرار بالإرسال
+    # حتى لو فشل الإرسال نفسه (الحدث وقع في البوت فعلاً)
+    if LOG_HOOK:
+        try:
+            LOG_HOOK(_kind_of(text), text)
+        except Exception as e:
+            print("alert log error:", e)
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat = os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat:
