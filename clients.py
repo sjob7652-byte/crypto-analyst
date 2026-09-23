@@ -313,7 +313,9 @@ class NewsClient:
             try:
                 req = urllib.request.Request(
                     url, headers={"User-Agent": BROWSER_UA})
-                raw = urllib.request.urlopen(req, timeout=12).read()
+                # حد أقصى 2MB قبل التحليل: خلاصات RSS الحقيقية أصغر بكثير —
+                # أي شيء أكبر = تضخيم كيانات XML خبيث (billion laughs) أو تلف
+                raw = urllib.request.urlopen(req, timeout=12).read(2_000_000)
                 root = ET.fromstring(raw)
                 got = (self._parse_rss(root, name, tier)
                        + self._parse_atom(root, name, tier))

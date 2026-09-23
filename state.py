@@ -44,6 +44,11 @@ def gist_load():
         content = (files.get("state.json") or {}).get("content")
         if not content:
             return None
+        # حد أقصى للحجم قبل التحليل: الـstate الحقيقي بضع مئات KB —
+        # أي شيء أكبر بكثير = تلف أو عبث، نرفضه بدل التهام الذاكرة
+        if len(content) > 5_000_000:
+            print("[SECURITY] محتوى state.json ضخم بشكل مريب — تم التجاهل")
+            return None
         s = json.loads(content)
         return s if isinstance(s, dict) else None
     except Exception:
@@ -127,14 +132,27 @@ _FORBIDDEN_KEY_PARTS = ("token", "secret", "passwd", "password", "session",
 
 
 def _assert_no_secrets(s):
-    """يفحص مفاتيح الحالة العليا — يعيد False ويطبع تحذيراً صارخاً
-    إذا وُجد مفتاح مشبوه (لمنع تسريب الأسرار إلى الـGist العام)."""
+    """يفحص مفاتيح الحالة بشكل تكراري (كل المستويات) — يعيد False ويطبع
+    تحذيراً صارخاً إذا وُجد مفتاح مشبوه (لمنع تسريب الأسرار إلى الـGist
+    العام). الفحص على المفاتيح فقط لا القيم: أسماء العملات (قيم) لا
+    تُسبب إيجابيات كاذبة مهما احتوت."""
+    bad = []
+
+    def walk(o):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                if any(part in str(k).lower()
+                       for part in _FORBIDDEN_KEY_PARTS):
+                    bad.append(str(k))
+                walk(v)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v)
+
     try:
-        keys = list((s or {}).keys())
+        walk(s or {})
     except Exception:
         return True
-    bad = [k for k in keys
-           if any(part in str(k).lower() for part in _FORBIDDEN_KEY_PARTS)]
     if bad:
         print(f"[SECURITY] رُفض حفظ الحالة: مفاتيح مشبوهة قد تكون أسراراً: {bad}")
         return False

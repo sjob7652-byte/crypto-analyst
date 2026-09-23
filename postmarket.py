@@ -20,6 +20,7 @@
 """
 
 import argparse
+import html
 import json
 import os
 import time
@@ -235,7 +236,10 @@ def build_report(a, btc_chg, ai_text, day_label):
     for ins in deterministic_insights(a, btc_chg):
         lines.append(f"• {ins}")
     if ai_text:
-        lines += ["", "🤖 <b>تحليل النموذج المحلي (Ollama):</b>", ai_text]
+        # نص النموذج اللغوي غير موثوق: قد يحتوي وسوم HTML (أو حقناً عبر
+        # أسماء العملات في الموجز) — يُهرَّب قبل إدخاله في رسالة HTML
+        lines += ["", "🤖 <b>تحليل النموذج المحلي (Ollama):</b>",
+                  html.escape(ai_text)]
     else:
         lines += ["",
                   "ℹ️ النموذج المحلي غير متاح على خوادم GitHub المؤقتة — "

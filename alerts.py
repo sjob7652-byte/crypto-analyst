@@ -18,15 +18,23 @@ def _slug(pid):
     return re.sub(r"[^a-zA-Z0-9]+", "-", str(pid or "")).strip("-")
 
 
+def _valid_gist_id(g):
+    """معرف Gist صحيح = 32 حرفاً سداسياً عشرياً (صيغة GitHub)."""
+    return bool(re.fullmatch(r"[0-9a-f]{32}", (g or "").strip().lower()))
+
+
 def wallet_link(res):
     """رابط المحفظة الوهمية — يفتح اللوحة مباشرة على صفقة هذه الإشارة."""
     gist = os.environ.get("GIST_ID", "")
-    q = f"?gist={gist}" if gist else ""
+    q = f"?gist={gist}" if _valid_gist_id(gist) else ""
     return f"{DASHBOARD_BASE}{q}#trade-{_slug(res.get('id'))}"
 
 
 # طابور الرسائل الفاشلة: تُحفظ في الذاكرة وتُعاد محاولة إرسالها
-# في بداية كل استدعاء لاحق — لا تضيع تنبيهات الانهيار في صمت
+# في بداية كل استدعاء لاحق — لا تضيع تنبيهات الانهيار في صمت.
+# كل عنصر: (النص، هل_يُسجل_في_الداشبورد) — نحتفظ بخيار log_alert مع
+# الرسالة نفسها، لأن بعض الرسائل (الملخص الدوري) Telegram-فقط بقرار
+# المستخدم، ويجب أن يبقى كذلك حتى بعد إعادة الإرسال من الطابور.
 _PENDING = []
 
 # خطاف سجل التنبيهات: يضبطه main.py ليحفظ كل تنبيه في الحالة (state)
@@ -103,12 +111,13 @@ def _log_sent(text):
 def _flush_pending(token, chat):
     """يفرغ طابور الرسائل المعلقة قبل إرسال الجديدة."""
     while _PENDING:
-        text = _PENDING[0]
+        text, log_alert = _PENDING[0]
         ok, _ = _post_message(token, chat, text)
         if not ok:
             break
         _PENDING.pop(0)
-        _log_sent(text)  # وصلت فعلاً الآن → تُسجل (مرة واحدة فقط)
+        if log_alert:
+            _log_sent(text)  # وصلت فعلاً الآن → تُسجل (مرة واحدة فقط)
         print(f"  -> أُعيد إرسال رسالة معلقة (متبقٍ: {len(_PENDING)})")
 
 
@@ -142,12 +151,14 @@ def send(text, dry_run=False, log_alert=True):
             break
         time.sleep(wait)
         wait *= 2
-    # فشل كل المحاولات: تُحفظ في الطابور (بحد أقصى) بدل الضياع
+    # فشل كل المحاولات: تُحفظ في الطابور (بحد أقصى) بدل الضياع —
+    # مع الاحتفاظ بخيار log_alert ليلتزم به الإرسال اللاحق
+    item = (text, log_alert)
     if len(_PENDING) < TG_PENDING_MAX:
-        _PENDING.append(text)
+        _PENDING.append(item)
     else:
         _PENDING.pop(0)
-        _PENDING.append(text)
+        _PENDING.append(item)
     print(f"[!] تعذّر إرسال التنبيه بعد {TG_MAX_RETRIES} محاولات — "
           f"حُفظ في الطابور ({len(_PENDING)} معلقة)")
     return False
@@ -175,11 +186,34 @@ def fmt_price(x):
     return f"${x:,.2f}" if x >= 0.01 else f"${x:.8g}"
 
 
+_URL_ALLOWLIST = (
+    # دومينات موثوقة مسموحة في روابط التنبيهات — أي رابط خارجها
+    # (أو بروتوكول غير https مثل javascript:/data:) يُستبدل بالرابط البديل
+    "dexscreener.com", "birdeye.so", "geckoterminal.com", "coingecko.com",
+    "coinmarketcap.com", "jup.ag", "raydium.io", "pump.fun",
+    "t.me", "telegram.me", "twitter.com", "x.com",
+    "github.com", "gist.github.com",
+)
+
+
 def _safe_url(u, fallback="https://dexscreener.com"):
-    """رابط آمن لوضعه في href: يمنع كسر الخاصية بعلامات اقتباس
-    (الروابط تأتي من APIs خارجية قد تكون خبيثة)."""
-    u = u or fallback
-    return html.escape(str(u), quote=True)
+    """رابط آمن لوضعه في href: قائمة سماح بالدومينات الموثوقة + https فقط.
+    الروابط تأتي من APIs خارجية قد تكون خبيثة — أي رابط لا يطابق القائمة
+    (أو فيه بروتوكول خطير مثل javascript:/data:) يُستبدل بالبديل."""
+    try:
+        from urllib.parse import urlsplit
+        u = str(u or "").strip()
+        if not u:
+            return html.escape(fallback, quote=True)
+        host = (urlsplit(u).hostname or "").lower()
+        scheme = (urlsplit(u).scheme or "").lower()
+        if scheme != "https":
+            raise ValueError("scheme")
+        if not any(host == d or host.endswith("." + d) for d in _URL_ALLOWLIST):
+            raise ValueError("host")
+        return html.escape(u, quote=True)
+    except Exception:
+        return html.escape(fallback, quote=True)
 
 
 def new_signal_msg(res, verdict):
@@ -295,7 +329,7 @@ def paper_closed_msg(name, pnl_usd, pnl_pct, reason, cash):
     icon = "🟢" if pnl_usd >= 0 else "🔴"
     return (
         f"💼 <b>المحفظة الافتراضية: أُغلقت صفقة {html.escape(name)}</b>\n"
-        f"السبب: {reason}\n"
+        f"السبب: {html.escape(reason)}\n"
         f"{icon} النتيجة: {pnl_usd:+.2f}$ ({pnl_pct:+.1f}%)\n"
         f"💰 الرصيد النقدي الآن: ${cash:.2f}\n"
         f"<i>تجربة وهمية — ليست أموالاً حقيقية.</i>"
@@ -396,7 +430,7 @@ def digest_msg(date_str, positions, new_signals, movers, ctx):
         lines.append("\n🔥 <b>أكبر تحركات عملات الميم:</b>")
         for sym, chg in movers[:3]:
             icon = "📈" if chg >= 0 else "📉"
-            lines.append(f"{icon} {sym}: {chg:+.1f}%")
+            lines.append(f"{icon} {html.escape(sym)}: {chg:+.1f}%")
 
     trending = (ctx or {}).get("trending") or []
     if trending:

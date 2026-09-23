@@ -724,6 +724,11 @@ def scan_watchlist(s, dry_run, ctx):
             verdict = make_verdict(res, ctx)
             print(f"  -> إشارة {res['signal']}: {res['display']} "
                   f"({res['score']}) نجاح~{verdict['prob']}%")
+            # بوابة الثقة (نفسها في كل المسارات): احتمال < 50% = مراقبة فقط
+            if below_threshold(verdict):
+                print(f"  -> ⏸ تحت عتبة الثقة ({verdict['prob']}% < {MIN_PROBABILITY}%): "
+                      f"{res.get('display')} — مراقبة فقط")
+                continue
             # التنبيه لا يُرسل إلا بعد فتح الصفقة (متابعة + وهمية) بنجاح
             if not open_position(s, res, verdict):
                 continue
