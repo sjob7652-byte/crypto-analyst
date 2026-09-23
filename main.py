@@ -738,10 +738,14 @@ def maybe_digest(s, dry_run, movers, ctx):
     now = datetime.now(timezone.utc)
     if now.hour not in DIGEST_HOURS_UTC:
         return
-    if s["stats"].get("digest_sent") == (now.strftime("%Y-%m-%d"), now.hour):
-        return
-    s["stats"]["digest_sent"] = (now.strftime("%Y-%m-%d"), now.hour)
-    positions = []
+       # مفتاح الإرسال كقائمة: JSON يحفظ القوائم كما هي عبر الـGist، أما الـtuple
+    # فكان يتحول إلى list بعد الحفظ فيضيع التطابق ويُعاد إرسال الملخص كل
+    # 5 دقائق طوال ساعة الإرسال (تضخم Telegram وسجل التنبيهات بالتكرار)
+    sent_key = [now.strftime("%Y-%m-%d"), now.hour]
+    if s["stats"].get("digest_sent") == sent_key:
+        return        
+    s["stats"]["digest_sent"] = sent_key
+    positions = []    
     for pid, pos in s["positions"].items():
         price, _ = current_price(pos)
         if price:
