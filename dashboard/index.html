@@ -6,7 +6,7 @@
 <title>محفظة الميم كوينز الوهمية — لوحة المراقبة</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<script src="https://unpkg.com/lucide@1.47.0/dist/umd/lucide.min.js"></script>
 <style>
   body {
     background: #070b14;
@@ -294,7 +294,7 @@ function renderCards(list) {
       const cu = chartUrl(t);
       const kindChip = t.kind === "binance"
         ? `<span class="chip">Binance</span>`
-        : `<span class="chip">DEX · ${t.chain || ""}</span>`;
+        : `<span class="chip">DEX · ${escHtml(t.chain || "")}</span>`;
       // حالة الجني الجزئي: كم بيعنا وكم ربحنا فعلياً + وقف التعادل
       const tpHit = (t.tp_hit || []).filter(Boolean).length;
       const isBE = t.be || tpHit > 0;
@@ -309,10 +309,10 @@ function renderCards(list) {
         : "";
       return `<div id="trade-${slug(id)}" class="trade-card glass flash p-4">
         <div class="flex items-center gap-3 mb-3">
-          <img src="${logoFor(t)}" alt="" class="w-11 h-11 rounded-full bg-white/5"
+          <img src="${escHtml(logoFor(t))}" alt="" class="w-11 h-11 rounded-full bg-white/5"
                onerror="this.onerror=null;this.src='${FALLBACK_COIN}'">
           <div class="flex-1 min-w-0">
-            <div class="font-extrabold truncate">${t.name || id}</div>
+            <div class="font-extrabold truncate">${escHtml(t.name || id)}</div>
             <div class="flex gap-1 mt-1">${kindChip}</div>
           </div>
         </div>
@@ -324,7 +324,7 @@ function renderCards(list) {
           <div class="flex justify-between"><span>Live</span><span class="text-slate-200">${live ? Number(live).toPrecision(4) : "—"}</span></div>
           <div class="flex justify-between"><span>Invested</span><span class="text-slate-200">${fmt$(t.invested || 0)}</span></div>
         </div>
-        ${cu ? `<a class="btn-chart text-white" target="_blank" rel="noopener" href="${cu}"><i data-lucide="candlestick-chart" class="w-4 h-4"></i> الشارت</a>` : ""}
+        ${cu ? `<a class="btn-chart text-white" target="_blank" rel="noopener" href="${escHtml(cu)}"><i data-lucide="candlestick-chart" class="w-4 h-4"></i> الشارت</a>` : ""}
       </div>`;
     }).join("");
   }
@@ -357,7 +357,7 @@ async function load() {
     $("sync-hint").textContent = "تم قبل لحظات";
   } catch (e) {
     $("dash").classList.remove("hidden");
-    $("t-grid").innerHTML = `<div class="glass p-6 text-center neg col-span-full">تعذّر قراءة الحالة: ${e.message}</div>`;
+    $("t-grid").innerHTML = `<div class="glass p-6 text-center neg col-span-full">تعذّر قراءة الحالة: ${escHtml(e.message)}</div>`;
     $("sync-hint").textContent = "فشل الجلب";
   }
 }
@@ -552,8 +552,8 @@ function renderClosedList(list) {
       ? `<span class="chip" title="حدث جزئي — مستثنى من مجاميع الربح والنجاح">جزئي</span>` : "";
     return `<div class="glass p-3">
       <div class="flex items-center justify-between gap-2 mb-1">
-        <div class="font-extrabold truncate">${t.name || "—"}</div>
-        <span class="shrink-0 flex gap-1"><span class="chip">${reason}</span>${partialTag}</span>
+        <div class="font-extrabold truncate">${escHtml(t.name || "—")}</div>
+        <span class="shrink-0 flex gap-1"><span class="chip">${escHtml(reason)}</span>${partialTag}</span>
       </div>
       <div class="text-[11px] text-slate-500 mb-2 font-mono" dir="ltr">${fmtTS(t.close_time)}</div>
       <div class="flex items-end justify-between gap-2">
