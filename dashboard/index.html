@@ -78,6 +78,18 @@
   .btn-chart:hover { filter: brightness(1.2); }
   .stat-ic { width: 34px; height: 34px; border-radius: .8rem; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,.06); }
   .stat-ic svg { width: 18px; height: 18px; }
+  /* صناديق قابلة للتمرير + شريط تمرير مخصص للثيم الداكن */
+  .scroll-dark { scrollbar-width: thin; scrollbar-color: rgba(96,165,250,.45) rgba(255,255,255,.03); }
+  .scroll-dark::-webkit-scrollbar { width: 8px; }
+  .scroll-dark::-webkit-scrollbar-track { background: rgba(255,255,255,.03); border-radius: 9999px; margin: 6px 0; }
+  .scroll-dark::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, rgba(59,130,246,.55), rgba(124,58,237,.55));
+    border-radius: 9999px; border: 2px solid transparent; background-clip: padding-box;
+  }
+  .scroll-dark::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, rgba(59,130,246,.9), rgba(124,58,237,.9));
+    border: 2px solid transparent; background-clip: padding-box;
+  }
 </style>
 </head>
 <body class="text-slate-200 min-h-screen">
@@ -179,7 +191,7 @@
         <div><div class="text-[11px] text-slate-500 mb-1">نسبة النجاح</div><div id="c-win" class="font-extrabold text-xl">—</div></div>
         <div><div class="text-[11px] text-slate-500 mb-1">صفقات مغلقة</div><div id="c-n" class="font-extrabold text-xl">—</div></div>
       </div>
-      <div id="c-list" class="space-y-2">
+      <div id="c-list" class="space-y-2 scroll-dark p-1 max-h-[50vh] overflow-y-auto">
         <div class="skel h-16"></div>
       </div>
     </section>
@@ -187,7 +199,7 @@
     <!-- آخر التنبيهات — الداشبورد "ينصت": نفس الأحداث المُرسلة إلى Telegram -->
     <section class="mb-5">
       <h2 class="font-extrabold mb-3 flex items-center gap-2"><i data-lucide="bell" class="w-5 h-5 text-amber-400"></i> آخر التنبيهات <span class="text-[11px] text-slate-500 font-normal">نفس ما يصل Telegram — عبر البيانات مباشرة</span></h2>
-      <div id="a-list" class="space-y-2">
+      <div id="a-list" class="space-y-2 scroll-dark p-1 max-h-[50vh] overflow-y-auto">
         <div class="skel h-16"></div>
       </div>
     </section>
