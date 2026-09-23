@@ -32,6 +32,8 @@ _PENDING = []
 # خطاف سجل التنبيهات: يضبطه main.py ليحفظ كل تنبيه في الحالة (state)
 # فيُعرض في الداشبورد — هكذا "ينصت" الداشبورد لكل ما يُرسل إلى Telegram
 # دون أن يقرأ Telegram نفسه (الاتجاه: البوت → Gist → الداشبورد).
+# يُستدعى فقط عند نجاح الإرسال فعلاً (status 200) — فيكون سجل الداشبورد
+# مطابقاً 1:1 لما استلمه المستخدم في Telegram، بلا زيادة ولا نقصان.
 LOG_HOOK = None
 
 
@@ -86,6 +88,18 @@ def _post_message(token, chat, text):
         return False, True
 
 
+def _log_sent(text):
+    """تسجيل التنبيه في سجل الداشبورد — يُستدعى فقط بعد وصول الرسالة
+    فعلاً إلى Telegram. هكذا يكون ما في الـGist مطابقاً تماماً لما في
+    Telegram: شراء/بيع/تعادل/منع شراء — كل ما أُرسل يُسجل، وما لم يُرسل
+    لا يُسجل."""
+    if LOG_HOOK:
+        try:
+            LOG_HOOK(_kind_of(text), text)
+        except Exception as e:
+            print("alert log error:", e)
+
+
 def _flush_pending(token, chat):
     """يفرغ طابور الرسائل المعلقة قبل إرسال الجديدة."""
     while _PENDING:
@@ -94,23 +108,21 @@ def _flush_pending(token, chat):
         if not ok:
             break
         _PENDING.pop(0)
+        _log_sent(text)  # وصلت فعلاً الآن → تُسجل (مرة واحدة فقط)
         print(f"  -> أُعيد إرسال رسالة معلقة (متبقٍ: {len(_PENDING)})")
 
 
-def send(text, dry_run=False):
+def send(text, dry_run=False, log_alert=True):
     """يرسل رسالة Telegram مع إعادة المحاولة والطابور.
-    في وضع التجربة يطبع فقط."""
+    في وضع التجربة يطبع فقط.
+    التسجيل في سجل التنبيهات (الداشبورد) يتم فقط عند نجاح الإرسال فعلاً —
+    ما يظهر في الداشبورد = ما وصل Telegram بالضبط (مطابقة 1:1).
+    log_alert=False: إرسال Telegram فقط دون تسجيل في الداشبورد
+    (للتقارير الدورية مثل الملخص اليومي)."""
     if dry_run:
         print(text)
         print("—" * 45)
         return True
-    # سجل التنبيهات: الداشبورد "ينصت" عبر الـGist — يُسجل القرار بالإرسال
-    # حتى لو فشل الإرسال نفسه (الحدث وقع في البوت فعلاً)
-    if LOG_HOOK:
-        try:
-            LOG_HOOK(_kind_of(text), text)
-        except Exception as e:
-            print("alert log error:", e)
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat = os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat:
@@ -123,6 +135,8 @@ def send(text, dry_run=False):
     for attempt in range(TG_MAX_RETRIES):
         ok, retryable = _post_message(token, chat, text)
         if ok:
+            if log_alert:
+                _log_sent(text)  # نجح الإرسال → يُسجل في الـGist
             return True
         if not retryable or attempt == TG_MAX_RETRIES - 1:
             break
