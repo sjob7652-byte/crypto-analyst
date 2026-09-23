@@ -175,6 +175,13 @@ def fmt_price(x):
     return f"${x:,.2f}" if x >= 0.01 else f"${x:.8g}"
 
 
+def _safe_url(u, fallback="https://dexscreener.com"):
+    """رابط آمن لوضعه في href: يمنع كسر الخاصية بعلامات اقتباس
+    (الروابط تأتي من APIs خارجية قد تكون خبيثة)."""
+    u = u or fallback
+    return html.escape(str(u), quote=True)
+
+
 def new_signal_msg(res, verdict):
     """إشارة شراء بكلام بسيط: سعر الدخول/الخروج + نسبة النجاح + السبب."""
     name = html.escape(res["display"])
@@ -198,7 +205,7 @@ def new_signal_msg(res, verdict):
         lines.append(f"⚠️ <b>انتبه:</b> {html.escape(v['warn'])}")
     lines += [
         "",
-        f"🔗 <a href=\"{res['pair_url']}\">الرسم البياني</a>",
+        f"🔗 <a href=\"{_safe_url(res.get('pair_url'))}\">الرسم البياني</a>",
         f"💼 <a href=\"{wallet_link(res)}\">تابع هذه الصفقة في المحفظة الوهمية</a>",
         "",
         DISCLAIMER,
@@ -415,7 +422,7 @@ def digest_msg(date_str, positions, new_signals, movers, ctx):
         for it in news[:4]:
             s = it.get("sentiment", 0)
             icon = "🟢" if s > 0.2 else ("🔴" if s < -0.2 else "⚪")
-            lines.append(f"{icon} <a href=\"{it['link']}\">{html.escape(it['title'][:85])}</a>")
+            lines.append(f"{icon} <a href=\"{_safe_url(it.get('link'), '#')}\">{html.escape(it['title'][:85])}</a>")
 
     lines.append("\n" + DISCLAIMER)
     return "\n".join(lines)
