@@ -738,14 +738,14 @@ def maybe_digest(s, dry_run, movers, ctx):
     now = datetime.now(timezone.utc)
     if now.hour not in DIGEST_HOURS_UTC:
         return
-       # مفتاح الإرسال كقائمة: JSON يحفظ القوائم كما هي عبر الـGist، أما الـtuple
+    # مفتاح الإرسال كقائمة: JSON يحفظ القوائم كما هي عبر الـGist، أما الـtuple
     # فكان يتحول إلى list بعد الحفظ فيضيع التطابق ويُعاد إرسال الملخص كل
     # 5 دقائق طوال ساعة الإرسال (تضخم Telegram وسجل التنبيهات بالتكرار)
     sent_key = [now.strftime("%Y-%m-%d"), now.hour]
     if s["stats"].get("digest_sent") == sent_key:
-        return        
+        return
     s["stats"]["digest_sent"] = sent_key
-    positions = []    
+    positions = []
     for pid, pos in s["positions"].items():
         price, _ = current_price(pos)
         if price:
@@ -766,9 +766,13 @@ def maybe_digest(s, dry_run, movers, ctx):
     }
     date_str = now.strftime("%Y-%m-%d")
     print("=== إرسال الملخص اليومي ===")
+    # الملخص الدوري: Telegram فقط — لا يُسجل في سجل تنبيهات الداشبورد
+    # (قرار المستخدم 2026-09-23: التقرير يصل Telegram فقط، بمحتواه
+    # الكامل كما كان — ربح/خسارة المحفظة الوهمية — والأرقام من نفس
+    # الـstate الذي يقرأه الداشبورد فتبقى متطابقة)
     alerts.send(alerts.digest_msg(date_str, positions,
                                   s["stats"].get("signals_today", 0),
-                                  movers, dctx), dry_run)
+                                  movers, dctx), dry_run, log_alert=False)
 
 
 def _sos_alert(error):
