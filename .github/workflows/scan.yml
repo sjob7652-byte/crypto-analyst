@@ -21,12 +21,17 @@ permissions:
 jobs:
   scan:
     runs-on: ubuntu-latest
+    # حماية: أي جولة عالقة تُقتل بعد 10 دقائق — وإلا تعلق مجموعة الـconcurrency
+    # ويتوقف البوت كاملاً في صمت (جولة معلقة واحدة تجمّد كل الجولات اللاحقة)
+    timeout-minutes: 10
     steps:
       - name: جلب الكود
-        uses: actions/checkout@v4
+        # actions/checkout@v4 مثبت على SHA (تحقق 2026-09-23) — لا إصدارات عائمة
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: استعادة حالة البوت (cache مجاني — بلا آلاف الـcommits)
-        uses: actions/cache/restore@v4
+        # actions/cache@v4 مثبت على SHA
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: state.json
           key: bot-state-${{ github.run_id }}
@@ -34,7 +39,8 @@ jobs:
             bot-state-
 
       - name: تثبيت Python
-        uses: actions/setup-python@v5
+        # actions/setup-python@v5 مثبت على SHA
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.12"
 
@@ -55,7 +61,8 @@ jobs:
           XBRIDGE_CHANNELS: ${{ secrets.XBRIDGE_CHANNELS }}
 
       - name: حفظ الحالة في الـcache للجولة القادمة
-        uses: actions/cache/save@v4
+        # actions/cache@v4 مثبت على SHA
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: state.json
           key: bot-state-${{ github.run_id }}
