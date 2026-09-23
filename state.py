@@ -1,9 +1,14 @@
 # -*- coding: utf-8 -*-
 """حفظ حالة البوت (الصفقات المفتوحة + التنبيهات المرسلة) في ملف JSON.
 
-التخزين الأساسي: GitHub Gist سري (GH_PAT + GIST_ID في متغيرات البيئة)
+التخزين الأساسي: GitHub Gist (GH_PAT + GIST_ID في متغيرات البيئة)
 — يعمل كقاعدة بيانات NoSQL مجانية، لا يُمسح مثل الـcache.
-الاحتياطي: ملف state.json المحلي (يُحفظ أيضاً في cache الـworkflow)."""
+الاحتياطي: ملف state.json المحلي (يُحفظ أيضاً في cache الـworkflow).
+
+⚠️ تحذير أمني: الـGist يجب أن يكون عاماً (public) لأن الداشبورد يقرأه
+مباشرة من المتصفح بلا مصادقة — لذلك يُمنع منعاً باتاً تخزين أي سر
+(توكن، كلمة سر، session، مفتاح API) في هذه الحالة. الدالة save()
+ترفض الحفظ تلقائياً إذا رصدت مفتاحاً مشبوهاً (حماية fail-closed)."""
 import json
 import os
 import time
@@ -115,6 +120,27 @@ def _default_paper():
             "closed_trades": []}  # أرشيف: كل صفقة خرج منها البوت مع ربحها/خسارتها
 
 
+# مفاتيح يُمنع ظهورها في الحالة — الـGist عام والداشبورد يقرأه بلا مصادقة،
+# فأي سر يُحفظ هنا يصبح مكشوفاً للعالم. الفحص fail-closed: يرفض الحفظ كاملاً.
+_FORBIDDEN_KEY_PARTS = ("token", "secret", "passwd", "password", "session",
+                        "api_key", "apikey", "private_key", "chat_id")
+
+
+def _assert_no_secrets(s):
+    """يفحص مفاتيح الحالة العليا — يعيد False ويطبع تحذيراً صارخاً
+    إذا وُجد مفتاح مشبوه (لمنع تسريب الأسرار إلى الـGist العام)."""
+    try:
+        keys = list((s or {}).keys())
+    except Exception:
+        return True
+    bad = [k for k in keys
+           if any(part in str(k).lower() for part in _FORBIDDEN_KEY_PARTS)]
+    if bad:
+        print(f"[SECURITY] رُفض حفظ الحالة: مفاتيح مشبوهة قد تكون أسراراً: {bad}")
+        return False
+    return True
+
+
 def load():
     # الأساسي: Gist السري → الاحتياطي: الملف المحلي (cache)
     s = gist_load()
@@ -126,6 +152,8 @@ def load():
 
 
 def save(s):
+    if not _assert_no_secrets(s):
+        return  # fail-closed: لا نحفظ أسراراً في الـGist العام أبداً
     s = _prune(s)
     _file_save(s)   # محلي (للـcache)
     gist_save(s)    # سحابي (الأساسي — best effort)
