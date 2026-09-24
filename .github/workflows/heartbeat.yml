@@ -1,0 +1,66 @@
+name: Heartbeat Monitor
+
+# مراقب خارجي: يتحقق كل 15 دقيقة أن بوت الـVM ما زال يكتب في الـGist.
+# قراءة فقط — لا يكتب أي شيء في الـGist (الـVM هو الكاتب الوحيد للحالة).
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check bot freshness
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python3 - <<'PYEOF'
+          import datetime, json, os, sys, time, urllib.parse, urllib.request
+
+          GIST_ID = "7181de8f94858379915d85d0a04bcbef"
+          STALE_AFTER_MIN = 30    # نعتبر البوت متوقفاً بعد 30 دقيقة بلا تحديث
+          CHECK_EVERY_MIN = 15    # دورية هذا الفحص
+          REMIND_EVERY_MIN = 120  # تذكير كل ساعتين أثناء استمرار التوقف
+
+          def tg_send(text):
+              token = os.environ["TELEGRAM_BOT_TOKEN"]
+              chat = os.environ["TELEGRAM_CHAT_ID"]
+              data = urllib.parse.urlencode({"chat_id": chat, "text": text}).encode()
+              req = urllib.request.Request(
+                  "https://api.telegram.org/bot%s/sendMessage" % token, data=data)
+              urllib.request.urlopen(req, timeout=15).read()
+
+          try:
+              with urllib.request.urlopen(
+                      "https://api.github.com/gists/%s" % GIST_ID,
+                      timeout=20) as r:
+                  gist = json.load(r)
+              updated = gist.get("updated_at", "")
+              ts = datetime.datetime.strptime(
+                  updated, "%Y-%m-%dT%H:%M:%SZ").replace(
+                  tzinfo=datetime.timezone.utc).timestamp()
+          except Exception as e:
+              # خلل في جهتنا (GitHub API) — لا نرسل تنبيهاً كاذباً، الفحص القادم يكفي
+              print("heartbeat check failed: %s" % e)
+              sys.exit(0)
+
+          stale_min = (time.time() - ts) / 60
+          print("last gist update: %s (%.1f min ago)" % (updated, stale_min))
+
+          if stale_min < STALE_AFTER_MIN:
+              print("OK - bot is alive")
+          elif (stale_min < STALE_AFTER_MIN + CHECK_EVERY_MIN
+                  or (stale_min % REMIND_EVERY_MIN) < CHECK_EVERY_MIN):
+              tg_send(
+                  "⚠️ تنبيه Heartbeat: بوت الـVM لم يحدّث الحالة منذ %d دقيقة. "
+                  "تحقق من السيرفر والـcron." % int(stale_min))
+              print("ALERT sent")
+          else:
+              print("stale, reminder not due yet")
+          PYEOF
