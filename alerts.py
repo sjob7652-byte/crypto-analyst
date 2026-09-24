@@ -336,6 +336,18 @@ def paper_closed_msg(name, pnl_usd, pnl_pct, reason, cash):
     )
 
 
+def circuit_breaker_msg(streak, halt_hours, cash):
+    """تنبيه إيقاف الشراء بعد سلسلة إغلاقات خاسرة — حماية رأس المال."""
+    return (
+        f"🛑 <b>قاطع الدائرة: إيقاف الشراء مؤقتاً</b>\n"
+        f"السبب: {streak} إغلاقات خاسرة متتالية\n"
+        f"⏸️ لن يفتح البوت صفقات جديدة لمدة {halt_hours} ساعة\n"
+        f"الصفقات المفتوحة حالياً تستمر تحت المتابعة العادية\n"
+        f"💰 الرصيد النقدي: ${cash:.2f}\n"
+        f"<i>حماية تلقائية لرأس المال — تجربة وهمية.</i>"
+    )
+
+
 def paper_tp_msg(name, level_idx, sold_pct, proceeds, realized, remaining_pct, cash):
     """تنبيه الجني الجزئي الحقيقي — يُرسل عند تنفيذ بيع جزئي فعلي في المحفظة الوهمية."""
     pct = int(TAKE_PROFITS[level_idx] * 100)

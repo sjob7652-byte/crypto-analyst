@@ -80,6 +80,9 @@ def _defaults(s):
     s.setdefault("paper", _default_paper())
     # أرشيف الصفقات المغلقة — يُملأ تدريجياً منذ هذا التحديث
     s["paper"].setdefault("closed_trades", [])
+    # تعبئة مفاتيح حزمة الحماية للحالات القديمة (ترحيل صامت)
+    for _k, _v in _default_paper().items():
+        s["paper"].setdefault(_k, _v)
     return s
 
 
@@ -122,7 +125,12 @@ def _file_save(s):
 def _default_paper():
     return {"cash": PAPER_START_BALANCE, "start": PAPER_START_BALANCE,
             "positions": {}, "trades": 0, "wins": 0, "losses": 0,
-            "closed_trades": []}  # أرشيف: كل صفقة خرج منها البوت مع ربحها/خسارتها
+            "closed_trades": [],  # أرشيف: كل صفقة خرج منها البوت مع ربحها/خسارتها
+            # حزمة الحماية (2026-09-24)
+            "consec_sl": 0,      # إغلاقات خاسرة متتالية (لـ circuit breaker)
+            "halt_until": 0.0,   # إيقاف الشراء حتى هذا الوقت (epoch)
+            "sl_cooldown": {},   # pid → وقت آخر إغلاق خاسر (منع إعادة الدخول)
+            }
 
 
 # مفاتيح يُمنع ظهورها في الحالة — الـGist عام والداشبورد يقرأه بلا مصادقة،

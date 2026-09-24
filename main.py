@@ -20,7 +20,9 @@ from config import (
     WAITLIST_ADD_PER_RUN, POS_REEVAL_MIN_SCORE, POS_REEVAL_MIN_AGE_H,
     VOL_SPIKE_MULT, VOL_SPIKE_LOOKBACK, VOL_SPIKE_COOLDOWN_H,
     PAPER_ENABLED, PAPER_START_BALANCE, PAPER_RISK_PER_TRADE,
-    PAPER_SELL_FRACTIONS, PAPER_SLIPPAGE, USE_XBRIDGE, XBRIDGE_MAX_AGE_H,
+    PAPER_SELL_FRACTIONS, PAPER_SLIPPAGE, PAPER_MAX_OPEN,
+    CIRCUIT_BREAKER_SL_STREAK, CIRCUIT_BREAKER_HALT_H, SL_COOLDOWN_H,
+    USE_XBRIDGE, XBRIDGE_MAX_AGE_H,
     MIN_PROBABILITY,
 )
 
@@ -410,8 +412,25 @@ def paper_buy(s, res, verdict=None):
     pid = res["id"]
     if pid in p["positions"]:
         return True  # الصفقة الوهمية موجودة أصلاً — الضمان محقق
-    # لا حد أقصى لعدد الصفقات: كل تنبيه Telegram يجب أن يكون له أثر في
-    # المحفظة الوهمية — الرصيد النقدي هو المحدد الطبيعي الوحيد
+    # ---------- حزمة الحماية (2026-09-24) ----------
+    # 1) سقف الصفقات المفتوحة — لا شراء جديد والمحفظة ممتلئة
+    if len(p["positions"]) >= PAPER_MAX_OPEN:
+        print(f"  -> سقف الصفقات المفتوحة ({PAPER_MAX_OPEN}) ممتلئ — لا شراء")
+        return False
+    # 2) circuit breaker: إيقاف الشراء بعد سلسلة إغلاقات خاسرة
+    if time.time() < p.get("halt_until", 0):
+        print("  -> إيقاف مؤقت للشراء (circuit breaker) — لا شراء")
+        return False
+    # 3) تهدئة: منع إعادة الدخول في نفس العملة بعد إغلاق خاسر
+    cd = p.get("sl_cooldown") or {}
+    # تنظيف المدخلات المنتهية أولاً
+    now = time.time()
+    cd = {k: v for k, v in cd.items() if now - v < SL_COOLDOWN_H * 3600}
+    p["sl_cooldown"] = cd
+    if pid in cd:
+        print(f"  -> تهدئة بعد إغلاق خاسر لـ {res['display']} — لا شراء")
+        return False
+    # الرصيد النقدي هو المحدد الطبيعي الثاني بعد سقف الصفقات
     amount = min(PAPER_RISK_PER_TRADE, p["cash"])
     if amount < 5:
         return False
@@ -471,6 +490,119 @@ def _archive_closed(p, pos, exit_price, pnl, reason, invested_override=None,
         del arch[:len(arch) - 2000]
 
 
+def _paper_close(p, pid, pos, eff_price, arch, s, dry_run):
+    """إغلاق كامل موحّد لصفقة وهمية — نقطة الخروج الوحيدة في الكود.
+    الترتيب ثابت دائماً: ردّ الكاش ← عدّاد الفوز/الخسارة ←
+    سلسلة الخسائر + تهدئة العملة + circuit-breaker ← الأرشفة (إجبارية).
+    هذا يمنع فجوة الأرشيف: مستحيل إغلاق صفقة دون أرشفتها، لأن كل
+    مسارات الإغلاق (SL/RUG/BE/EXPIRED) تمرّ من هنا إجبارياً.
+    يرجع (pnl, proceeds)."""
+    qty = pos.get("qty") or 0
+    entry = pos.get("entry") or 0
+    proceeds = qty * eff_price
+    pnl = proceeds - qty * entry + pos.get("realized", 0)
+    p["cash"] += proceeds
+    if pnl >= 0:
+        p["wins"] += 1
+        p["consec_sl"] = 0
+    else:
+        p["losses"] += 1
+        # سلسلة الخسائر المتتالية + تهدئة: منع إعادة الدخول في نفس العملة
+        p["consec_sl"] = p.get("consec_sl", 0) + 1
+        p.setdefault("sl_cooldown", {})[pid] = time.time()
+        # circuit breaker: إيقاف الشراء بعد N إغلاقات خاسرة متتالية
+        # (لا تمديد تلقائي أثناء الإيقاف — يُعاد التفعيل فقط بعد انتهائه)
+        if (p["consec_sl"] >= CIRCUIT_BREAKER_SL_STREAK
+                and time.time() >= p.get("halt_until", 0)):
+            p["halt_until"] = time.time() + CIRCUIT_BREAKER_HALT_H * 3600
+            print(f"  -> 🛑 circuit breaker: {p['consec_sl']} إغلاقات خاسرة "
+                  f"متتالية — إيقاف الشراء {CIRCUIT_BREAKER_HALT_H}h")
+            try:
+                alerts.send(alerts.circuit_breaker_msg(
+                    p["consec_sl"], CIRCUIT_BREAKER_HALT_H, p["cash"]), dry_run)
+            except Exception as e:
+                print(f"  -> تعذر إرسال تنبيه circuit breaker: {e}")
+    # الأرشفة إجبارية — لا إغلاق دون سجل
+    _archive_closed(p, pos, eff_price, pnl, arch)
+    return pnl, proceeds
+
+
+def _update_one_paper_position(s, p, pid, pos, closed, partials, dry_run):
+    """متابعة صفقة وهمية واحدة — تُستدعى داخل try/except لكل صفقة."""
+    price, _liq = current_price(pos)
+    if not price:
+        return
+    entry = pos["entry"]
+    # ترحيل: صفقات قديمة قبل تبسيط الأهداف (3 → 1)
+    th = pos.get("tp_hit") or []
+    pos["tp_hit"] = (th + [False] * len(TAKE_PROFITS))[:len(TAKE_PROFITS)]
+    if pos["tp_hit"][0] and not pos.get("be"):
+        pos["be"] = True  # وصلت الهدف سابقاً → وقفها الآن عند الدخول
+    # سعر التنفيذ الواقعي عند البيع (أرخص بسبب الانزلاق) — التفعيل يبقى
+    # على سعر السوق الخام، لكن التنفيذ الفعلي ينزلق
+    eff_price = price * (1 - PAPER_SLIPPAGE)
+    # الهدف الوحيد (+30%): بيع 50% فوراً + نقل وقف الخسارة لسعر الدخول
+    for i, tp in enumerate(TAKE_PROFITS):
+        if not pos["tp_hit"][i] and price >= entry * (1 + tp):
+            pos["tp_hit"][i] = True
+            sell_qty = pos["qty"] * PAPER_SELL_FRACTIONS[i]
+            proceeds = sell_qty * eff_price
+            part_pnl = proceeds - sell_qty * entry
+            pos["qty"] -= sell_qty
+            pos["realized"] += part_pnl
+            pos["be"] = True  # 🛡️ النصف المتبقي أصبح خالي المخاطر
+            p["cash"] += proceeds
+            print(f"  -> وهمي: جني جزئي 50% {pos['name']} "
+                  f"(+${part_pnl:.2f} محقق) — وقف الخسارة → الدخول")
+            # أرشفة الجني الجزئي كحدث مستقل (partial: يُستثنى من مجاميع
+            # الربح/النجاح في الداشبورد — الإغلاق النهائي يحسب الكل)
+            _archive_closed(p, pos, eff_price, part_pnl, "TP1",
+                            invested_override=sell_qty * entry,
+                            partial=True)
+            partials.append(pid)
+            # جني جزئي حقيقي: نُعلن البيع الفعلي لا مجرد نصيحة
+            orig_qty = pos["invested"] / entry if entry else 0
+            remaining_pct = (pos["qty"] / orig_qty * 100
+                             if orig_qty else 0)
+            alerts.send(alerts.paper_tp_msg(
+                pos["name"], i, PAPER_SELL_FRACTIONS[i] * 100,
+                proceeds, pos["realized"], remaining_pct,
+                p["cash"]), dry_run)
+            break
+    if pid in closed:
+        return
+    # وقف الخسارة: بعد الجني ينتقل لسعر الدخول (تعادل) — قبل الجني -15%
+    # (خسارة ≥70% فجأة → "انهيار" Rug Pull بدل وقف الخسارة العادي)
+    stop = entry if pos.get("be") else entry * (1 - STOP_LOSS)
+    if price <= stop:
+        loss = 1 - price / entry
+        rug = loss >= RUG_ALERT_LOSS
+        if rug and loss >= RUG_BLACKLIST_LOSS:
+            blacklist_rug(s, pos, loss)
+        if rug:
+            reason, arch = "🚨 انهيار مفاجئ (Rug Pull)", "RUG"
+        elif pos.get("be"):
+            reason, arch = "⚖️ تعادل: خروج عند سعر الدخول", "BE"
+        else:
+            reason, arch = "وقف الخسارة 🛑", "SL"
+        # الإغلاق المركزي: كاش + عدّادات + حماية + أرشفة (إجبارية)
+        pnl, _proceeds = _paper_close(p, pid, pos, eff_price, arch,
+                                      s, dry_run)
+        closed.append(pid)
+        print(f"  -> وهمي: {arch} {pos['name']} (${pnl:+.2f})")
+        alerts.send(alerts.paper_closed_msg(
+            pos["name"], pnl,
+            pnl / pos["invested"] * 100 if pos["invested"] else 0,
+            reason, p["cash"]), dry_run)
+        return
+    # انتهاء مدة المتابعة: بيع بسعر السوق
+    if time.time() - pos["entry_time"] > POSITION_MAX_AGE_DAYS * 86400:
+        pnl, _proceeds = _paper_close(p, pid, pos, eff_price, "EXPIRED",
+                                      s, dry_run)
+        closed.append(pid)
+        print(f"  -> وهمي: EXPIRED {pos['name']} (${pnl:+.2f})")
+
+
 def update_paper(s, dry_run):
     """يتابع الصفقات الوهمية: بيع جزئي عند الأهداف، بيع كامل عند وقف الخسارة."""
     p = s["paper"]
@@ -478,92 +610,28 @@ def update_paper(s, dry_run):
         return
     print("=== المحفظة الافتراضية ===")
     closed = []
+    partials = []
+    arch_before = len(p.get("closed_trades", []))
     for pid, pos in list(p["positions"].items()):
-        price, _liq = current_price(pos)
-        if not price:
+        # صفقة واحدة فاسدة يجب ألا تُسقط متابعة البقية
+        try:
+            _update_one_paper_position(s, p, pid, pos, closed, partials,
+                                       dry_run)
+        except Exception as e:
+            print(f"  -> خطأ في متابعة {pos.get('name')}: {e} — تُترك مفتوحة")
             continue
-        entry = pos["entry"]
-        # ترحيل: صفقات قديمة قبل تبسيط الأهداف (3 → 1)
-        th = pos.get("tp_hit") or []
-        pos["tp_hit"] = (th + [False] * len(TAKE_PROFITS))[:len(TAKE_PROFITS)]
-        if pos["tp_hit"][0] and not pos.get("be"):
-            pos["be"] = True  # وصلت الهدف سابقاً → وقفها الآن عند الدخول
-        # سعر التنفيذ الواقعي عند البيع (أرخص بسبب الانزلاق) — التفعيل يبقى
-        # على سعر السوق الخام، لكن التنفيذ الفعلي ينزلق
-        eff_price = price * (1 - PAPER_SLIPPAGE)
-        # الهدف الوحيد (+30%): بيع 50% فوراً + نقل وقف الخسارة لسعر الدخول
-        for i, tp in enumerate(TAKE_PROFITS):
-            if not pos["tp_hit"][i] and price >= entry * (1 + tp):
-                pos["tp_hit"][i] = True
-                sell_qty = pos["qty"] * PAPER_SELL_FRACTIONS[i]
-                proceeds = sell_qty * eff_price
-                part_pnl = proceeds - sell_qty * entry
-                pos["qty"] -= sell_qty
-                pos["realized"] += part_pnl
-                pos["be"] = True  # 🛡️ النصف المتبقي أصبح خالي المخاطر
-                p["cash"] += proceeds
-                print(f"  -> وهمي: جني جزئي 50% {pos['name']} "
-                      f"(+${part_pnl:.2f} محقق) — وقف الخسارة → الدخول")
-                # أرشفة الجني الجزئي كحدث مستقل (partial: يُستثنى من مجاميع
-                # الربح/النجاح في الداشبورد — الإغلاق النهائي يحسب الكل)
-                _archive_closed(p, pos, eff_price, part_pnl, "TP1",
-                                invested_override=sell_qty * entry,
-                                partial=True)
-                # جني جزئي حقيقي: نُعلن البيع الفعلي لا مجرد نصيحة
-                orig_qty = pos["invested"] / entry if entry else 0
-                remaining_pct = (pos["qty"] / orig_qty * 100
-                                 if orig_qty else 0)
-                alerts.send(alerts.paper_tp_msg(
-                    pos["name"], i, PAPER_SELL_FRACTIONS[i] * 100,
-                    proceeds, pos["realized"], remaining_pct,
-                    p["cash"]), dry_run)
-                break
-        if pid in closed:
-            continue
-        # وقف الخسارة: بعد الجني ينتقل لسعر الدخول (تعادل) — قبل الجني -15%
-        # (خسارة ≥70% فجأة → "انهيار" Rug Pull بدل وقف الخسارة العادي)
-        stop = entry if pos.get("be") else entry * (1 - STOP_LOSS)
-        if price <= stop:
-            loss = 1 - price / entry
-            proceeds = pos["qty"] * eff_price
-            pnl = proceeds - pos["qty"] * entry + pos["realized"]
-            p["cash"] += proceeds
-            closed.append(pid)
-            rug = loss >= RUG_ALERT_LOSS
-            if rug and loss >= RUG_BLACKLIST_LOSS:
-                blacklist_rug(s, pos, loss)
-            if rug:
-                reason, arch = "🚨 انهيار مفاجئ (Rug Pull)", "RUG"
-                p["losses"] += 1
-            elif pos.get("be"):
-                reason, arch = "⚖️ تعادل: خروج عند سعر الدخول", "BE"
-                if pnl >= 0:
-                    p["wins"] += 1
-                else:
-                    p["losses"] += 1
-            else:
-                reason, arch = "وقف الخسارة 🛑", "SL"
-                p["losses"] += 1
-            _archive_closed(p, pos, eff_price, pnl, arch)
-            print(f"  -> وهمي: {arch} {pos['name']} (${pnl:+.2f})")
-            alerts.send(alerts.paper_closed_msg(
-                pos["name"], pnl,
-                pnl / pos["invested"] * 100 if pos["invested"] else 0,
-                reason, p["cash"]), dry_run)
-            continue
-        # انتهاء مدة المتابعة: بيع بسعر السوق
-        if time.time() - pos["entry_time"] > POSITION_MAX_AGE_DAYS * 86400:
-            proceeds = pos["qty"] * eff_price
-            pnl = proceeds - pos["qty"] * entry + pos["realized"]
-            p["cash"] += proceeds
-            if pnl >= 0:
-                p["wins"] += 1
-            else:
-                p["losses"] += 1
-            _archive_closed(p, pos, eff_price, pnl, "EXPIRED")
-            closed.append(pid)
     for pid in closed:
         p["positions"].pop(pid, None)
+    # حارس الأرشيف: كل إغلاق في هذا التشغيل يجب أن يقابله سجل —
+    # أي فجوة تُعلن فوراً بدل أن تُكتشف بعد أسابيع
+    arch_after = len(p.get("closed_trades", []))
+    expected = arch_before + len(closed) + len(partials)
+    if arch_after != expected:
+        msg = (f"⚠️ فجوة أرشيف في المحفظة الوهمية: أُغلقت {len(closed)} صفقة "
+               f"(+{len(partials)} جني جزئي) لكن الأرشيف زاد "
+               f"{arch_after - arch_before} فقط — راجع السجلات")
+        print("  -> " + msg)
+        alerts.send(msg, dry_run)
 
 
 def paper_summary(s):
