@@ -158,6 +158,7 @@ function applyFilter(f) {
   renderCards(list);
 }
 
+let _etag = null; // للطلب المشروط: 304 لا يستهلك حصة GitHub API
 async function load() {
   loadSentiment();
   if (!GIST_ID) { $("setup").classList.remove("hidden"); return; }
@@ -165,8 +166,12 @@ async function load() {
   $("sync-hint").textContent = "جارٍ الجلب…";
   try {
     // no-store: تجاوز كاش المتصفح — أحدث نسخة من الـGist مباشرة
-    const r = await fetch(`https://api.github.com/gists/${GIST_ID}`, {cache: "no-store"});
+    // If-None-Match: إن لم يتغير الـGist يرد 304 (لا يُحتسب من حصة الـ60/ساعة)
+    const headers = _etag ? {"If-None-Match": _etag} : {};
+    const r = await fetch(`https://api.github.com/gists/${GIST_ID}`, {cache: "no-store", headers});
+    if (r.status === 304) { $("sync-hint").textContent = "محدّث ✓"; return; }
     if (!r.ok) throw new Error("gist " + r.status);
+    _etag = r.headers.get("ETag");
     const g = await r.json();
     const file = g.files["state.json"];
     if (!file) throw new Error("no state.json");
@@ -392,6 +397,6 @@ function renderClosedList(list) {
 $("refresh").onclick = load;
 document.querySelectorAll(".ftab").forEach(b => b.onclick = () => applyFilter(b.dataset.f));
 document.querySelectorAll(".cftab").forEach(b => b.onclick = () => applyClosedFilter(b.dataset.cf));
-setInterval(load, 60000);
+setInterval(load, 15000); // تحديث كل 15 ثانية (آمن بفضل ETag)
 load();
 if (window.lucide) lucide.createIcons();
