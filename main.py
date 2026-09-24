@@ -533,6 +533,22 @@ def _paper_close(p, pid, pos, eff_price, arch, s, dry_run):
 
 def _update_one_paper_position(s, p, pid, pos, closed, partials, dry_run):
     """متابعة صفقة وهمية واحدة — تُستدعى داخل try/except لكل صفقة."""
+    # انتهاء مدة المتابعة (time-stop): يُفحص أولاً — حتى لو تعذّر جلب
+    # السعر الحالي، الصفقة العتيقة تُغلق (بسعر الدخول) ولا تبقى عالقة للأبد
+    if time.time() - pos["entry_time"] > POSITION_MAX_AGE_H * 3600:
+        price_now, _liq = current_price(pos)
+        eff_price = (price_now * (1 - PAPER_SLIPPAGE)
+                     if price_now else pos["entry"])
+        pnl, _proceeds = _paper_close(p, pid, pos, eff_price, "EXPIRED",
+                                      s, dry_run)
+        closed.append(pid)
+        print(f"  -> وهمي: EXPIRED {pos['name']} (${pnl:+.2f})")
+        alerts.send(alerts.paper_closed_msg(
+            pos["name"], pnl,
+            pnl / pos["invested"] * 100 if pos["invested"] else 0,
+            "⏱️ انتهاء المدة (time-stop: 30 ساعة بلا هدف)", p["cash"]),
+            dry_run)
+        return
     price, _liq = current_price(pos)
     if not price:
         return
@@ -598,18 +614,6 @@ def _update_one_paper_position(s, p, pid, pos, closed, partials, dry_run):
             pos["name"], pnl,
             pnl / pos["invested"] * 100 if pos["invested"] else 0,
             reason, p["cash"]), dry_run)
-        return
-    # انتهاء مدة المتابعة (time-stop): بيع بسعر السوق + تنبيه
-    if time.time() - pos["entry_time"] > POSITION_MAX_AGE_H * 3600:
-        pnl, _proceeds = _paper_close(p, pid, pos, eff_price, "EXPIRED",
-                                      s, dry_run)
-        closed.append(pid)
-        print(f"  -> وهمي: EXPIRED {pos['name']} (${pnl:+.2f})")
-        alerts.send(alerts.paper_closed_msg(
-            pos["name"], pnl,
-            pnl / pos["invested"] * 100 if pos["invested"] else 0,
-            "⏱️ انتهاء المدة (time-stop: 30 ساعة بلا هدف)", p["cash"]),
-            dry_run)
         return
 
 
