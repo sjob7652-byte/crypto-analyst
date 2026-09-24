@@ -878,6 +878,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true",
                     help="طباعة الرسائل بدل إرسالها وعدم حفظ الحالة")
+    ap.add_argument("--monitor", action="store_true",
+                    help="المراقب الخفيف: متابعة الصفقات المفتوحة فقط "
+                         "(أسعار + خروج) بلا اكتشاف/شراء/ملخصات")
     a = ap.parse_args()
 
     try:
@@ -944,7 +947,14 @@ def ensure_commander():
 def _run(a):
     # وضع التجربة: بلا قفل وبلا مستمع أوامر
     if a.dry_run:
-        _scan(a)
+        (_monitor if a.monitor else _scan)(a)
+        return
+    if a.monitor:
+        # المراقب الخفيف (كل دقيقة): نفس القفل المشترك لمنع سباق الكتابة
+        # مع السكانر/الأوامر، لكن بلا إقلاع commander (الفحص الكامل يتكفل
+        # به كل دقيقتين) وبلا اكتشاف/شراء/ملخصات.
+        with state_locked():
+            _monitor(a)
         return
     ensure_commander()
     # القفل المشترك مع مستمع الأوامر: الفحص كاملاً عملية ذرية واحدة —
@@ -972,6 +982,26 @@ def _scan(a):
     if not a.dry_run:
         st.save(s)
     print("تم.")
+
+
+def _monitor(a):
+    """المراقب الخفيف للصفقات المفتوحة — يُشغَّل كل دقيقة عبر cron.
+
+    يستعمل نفس دوال المتابعة بالضبط المستعملة في الفحص الكامل
+    (update_positions للصفقات المتابعة + update_paper للمحفظة الوهمية) —
+    نفس القواعد: الهدف الوحيد +30% (جني 50% + نقل الوقف للدخول)،
+    وقف الخسارة -15% (أو عند الدخول بعد الجني)، الانهيار، وانتهاء
+    المدة 30h — لكن بلا build_context الثقيل وبلا اكتشاف عملات جديدة
+    وبلا شراء وبلا ملخصات. النتيجة: دقة الخروج ~دقيقة بدل ~دقيقتين،
+    بتكلفة بضعة طلبات API فقط (سعر كل صفقة مفتوحة)."""
+    s = st.load()
+    # الداشبورد ينصت: كل alerts.send يُسجل في الحالة → يُعرض في الداشبورد
+    alerts.LOG_HOOK = lambda kind, text: _log_alert(s, kind, text)
+    update_positions(s, a.dry_run)
+    update_paper(s, a.dry_run)
+    if not a.dry_run:
+        st.save(s)
+    print("تم (مراقب).")
 
 
 if __name__ == "__main__":
