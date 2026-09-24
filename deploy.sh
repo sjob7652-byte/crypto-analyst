@@ -35,12 +35,24 @@ echo "=== [3/6] python venv + deps ==="
 echo "=== [4/6] runner wrappers ==="
 cat > "$BOT_DIR/run_scan.sh" << 'EOF'
 #!/bin/bash
-# 5-minute scanner: self-update code, load secrets, run once (flock in cron prevents overlap)
+# 2-minute scanner: self-update code, load secrets, run once (flock in cron prevents overlap)
 REPO_DIR="$HOME/bot/crypto-analyst"
 cd "$REPO_DIR"
 git fetch -q origin >/dev/null 2>&1 && git reset -q --hard origin/main >/dev/null 2>&1 || true
 if [ -f "$HOME/bot/.env" ]; then set -a; . "$HOME/bot/.env"; set +a; fi
 exec "$HOME/bot/venv/bin/python" main.py
+EOF
+cat > "$BOT_DIR/run_monitor.sh" << 'EOF'
+#!/bin/bash
+# Lightweight position monitor (every minute): self-update code, load secrets,
+# then main.py --monitor — open positions only (prices + SL/TP/expiry exits).
+# No discovery, no buys, no digests. Own flock lock so a slow scan never
+# blocks it; state.lock serializes actual state mutations with the scanner.
+REPO_DIR="$HOME/bot/crypto-analyst"
+cd "$REPO_DIR"
+git fetch -q origin >/dev/null 2>&1 && git reset -q --hard origin/main >/dev/null 2>&1 || true
+if [ -f "$HOME/bot/.env" ]; then set -a; . "$HOME/bot/.env"; set +a; fi
+exec "$HOME/bot/venv/bin/python" main.py --monitor
 EOF
 cat > "$BOT_DIR/run_postmarket.sh" << 'EOF'
 #!/bin/bash
@@ -51,12 +63,13 @@ git fetch -q origin >/dev/null 2>&1 && git reset -q --hard origin/main >/dev/nul
 if [ -f "$HOME/bot/.env" ]; then set -a; . "$HOME/bot/.env"; set +a; fi
 exec "$HOME/bot/venv/bin/python" postmarket.py
 EOF
-chmod +x "$BOT_DIR/run_scan.sh" "$BOT_DIR/run_postmarket.sh"
+chmod +x "$BOT_DIR/run_scan.sh" "$BOT_DIR/run_postmarket.sh" "$BOT_DIR/run_monitor.sh"
 
 echo "=== [5/6] cron ==="
 CRON_SCAN="*/2 * * * * /usr/bin/flock -n $BOT_DIR/scan.lock $BOT_DIR/run_scan.sh >> $BOT_DIR/scan.log 2>&1"
 CRON_PM="59 22 * * * /usr/bin/flock -n $BOT_DIR/scan.lock $BOT_DIR/run_postmarket.sh >> $BOT_DIR/postmarket.log 2>&1"
-( crontab -l 2>/dev/null | grep -v "bot/run_scan.sh\|bot/run_postmarket.sh"; echo "$CRON_SCAN"; echo "$CRON_PM" ) | crontab -
+CRON_MON="* * * * * /usr/bin/flock -n $BOT_DIR/monitor.lock $BOT_DIR/run_monitor.sh >> $BOT_DIR/monitor.log 2>&1"
+( crontab -l 2>/dev/null | grep -v "bot/run_scan.sh\|bot/run_postmarket.sh\|bot/run_monitor.sh"; echo "$CRON_SCAN"; echo "$CRON_PM"; echo "$CRON_MON" ) | crontab -
 crontab -l | grep "bot/run_"
 
 echo "=== [6/6] secrets check ==="
