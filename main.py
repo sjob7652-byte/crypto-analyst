@@ -3,7 +3,10 @@
 """المشغّل الرئيسي: فحص العملات الجديدة → تحليل → تنبيه → متابعة الصفقات."""
 import argparse
 import html
+import os
 import re
+import subprocess
+import sys
 import time
 from datetime import datetime, timezone
 
@@ -12,10 +15,11 @@ import analyzer
 import alerts
 import expert
 import state as st
+from statelock import state_locked
 from config import (
     CHAINS, SCAN_LIMIT, MIN_LIQUIDITY_USD, MIN_VOLUME_24H_USD,
     MIN_TXNS_24H, MAX_PAIR_AGE_DAYS, WATCHLIST, TAKE_PROFITS, STOP_LOSS,
-    POSITION_MAX_AGE_DAYS, DIGEST_HOURS_UTC, USE_COINGECKO, USE_NEWS,
+    POSITION_MAX_AGE_H, DIGEST_HOURS_UTC, USE_COINGECKO, USE_NEWS,
     USE_FNG, NEW_ALERT_MAX_AGE_H, WAITLIST_MAX_AGE_H, WAITLIST_MAX_SIZE,
     WAITLIST_ADD_PER_RUN, POS_REEVAL_MIN_SCORE, POS_REEVAL_MIN_AGE_H,
     VOL_SPIKE_MULT, VOL_SPIKE_LOOKBACK, VOL_SPIKE_COOLDOWN_H,
@@ -595,12 +599,18 @@ def _update_one_paper_position(s, p, pid, pos, closed, partials, dry_run):
             pnl / pos["invested"] * 100 if pos["invested"] else 0,
             reason, p["cash"]), dry_run)
         return
-    # انتهاء مدة المتابعة: بيع بسعر السوق
-    if time.time() - pos["entry_time"] > POSITION_MAX_AGE_DAYS * 86400:
+    # انتهاء مدة المتابعة (time-stop): بيع بسعر السوق + تنبيه
+    if time.time() - pos["entry_time"] > POSITION_MAX_AGE_H * 3600:
         pnl, _proceeds = _paper_close(p, pid, pos, eff_price, "EXPIRED",
                                       s, dry_run)
         closed.append(pid)
         print(f"  -> وهمي: EXPIRED {pos['name']} (${pnl:+.2f})")
+        alerts.send(alerts.paper_closed_msg(
+            pos["name"], pnl,
+            pnl / pos["invested"] * 100 if pos["invested"] else 0,
+            "⏱️ انتهاء المدة (time-stop: 30 ساعة بلا هدف)", p["cash"]),
+            dry_run)
+        return
 
 
 def update_paper(s, dry_run):
@@ -736,8 +746,8 @@ def update_positions(s, dry_run):
                     alerts.send(alerts.pos_deteriorated_msg(
                         pos["name"], entry, price,
                         pos.get("score"), rr["score"]), dry_run)
-        # انتهاء مدة المتابعة
-        if time.time() - pos["entry_time"] > POSITION_MAX_AGE_DAYS * 86400:
+        # انتهاء مدة المتابعة (time-stop)
+        if time.time() - pos["entry_time"] > POSITION_MAX_AGE_H * 3600:
             st.record_outcome(s, pos, pos.get("best_hit") or "expired")
             closed.append(pid)
     for pid in closed:
@@ -894,7 +904,52 @@ def _log_alert(s, kind, text):
         del log[:len(log) - 40]
 
 
+def ensure_commander():
+    """يضمن أن مستمع أوامر Telegram يعمل — يُستدعى في بداية كل فحص.
+
+    النشر بلا SSH: الـVM يسحب الكود تلقائياً كل تشغيل، وأول فحص بعد
+    وصول commander.py يُقلعه كعملية منفصلة دائمة (start_new_session).
+    ملف pid يمنع التكرار."""
+    try:
+        repo_dir = os.path.dirname(os.path.abspath(__file__))
+        bot_dir = os.path.dirname(repo_dir)
+        cmd_path = os.path.join(repo_dir, "commander.py")
+        if not os.path.exists(cmd_path):
+            return
+        pid_file = os.path.join(bot_dir, "commander.pid")
+        alive = False
+        try:
+            with open(pid_file) as f:
+                pid = int(f.read().strip())
+            os.kill(pid, 0)
+            alive = True
+        except Exception:
+            alive = False
+        if alive:
+            return
+        log = open(os.path.join(bot_dir, "commander.log"), "a")
+        subprocess.Popen([sys.executable, cmd_path],
+                         start_new_session=True,
+                         stdout=log, stderr=subprocess.STDOUT,
+                         stdin=subprocess.DEVNULL)
+        print("  -> commander started")
+    except Exception as e:
+        print("  -> ensure_commander failed:", e)
+
+
 def _run(a):
+    # وضع التجربة: بلا قفل وبلا مستمع أوامر
+    if a.dry_run:
+        _scan(a)
+        return
+    ensure_commander()
+    # القفل المشترك مع مستمع الأوامر: الفحص كاملاً عملية ذرية واحدة —
+    # أي أمر /sell أو /halt أثناء الفحص ينتظر دوره بدل سباق الكتابة
+    with state_locked():
+        _scan(a)
+
+
+def _scan(a):
     s = st.load()
     # الداشبورد ينصت: كل alerts.send يُسجل في الحالة → يُعرض في الداشبورد
     alerts.LOG_HOOK = lambda kind, text: _log_alert(s, kind, text)
