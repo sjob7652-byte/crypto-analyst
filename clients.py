@@ -2,12 +2,63 @@
 """عملاء مصادر البيانات المجانية: Dexscreener / honeypot.is / Binance."""
 import time
 import random
+import re
 import requests
 from config import (
     DEXSCREENER_API, HONEYPOT_API, HONEYPOT_CHAIN_IDS, RUGCHECK_API,
     BINANCE_API, CHAINS, REQUEST_TIMEOUT, USER_AGENT, BROWSER_UA,
-    BACKOFF_TRIES, BACKOFF_BASE,
+    BACKOFF_TRIES, BACKOFF_BASE, GECKOTERMINAL_API, GECKO_NETWORKS,
+    GECKO_POOL_LIMIT, REDDIT_SUBS, REDDIT_LIMIT,
+    SOURCE_FAILS_TO_COOL, SOURCE_COOLDOWN_BASE, SOURCE_COOLDOWN_MAX,
 )
+
+COINGECKO_API = "https://api.coingecko.com/api/v3"
+COINPAPRIKA_API = "https://api.coinpaprika.com/v1"
+KRAKEN_API = "https://api.kraken.com/0/public"
+JUPITER_PRICE_API = "https://lite-api.jup.ag/price/v3"
+
+
+# ---------- محرك سلاسل المصادر الاحتياطية (failover) ----------
+def chain_try(s, key, candidates, need=None):
+    """سلسلة مصادر احتياطية: جرّب المرشحين بالترتيب، الأول الذي يعيد
+    بيانات صالحة يفوز. إذا فشل مصدر/انتهى حدّه → الانتقال للثاني فوراً.
+
+    s: قاموس الحالة (تُحفظ فيه صحة المصادر: s["sources"][key][name])
+    key: اسم السلسلة ("pair"، "trending"...)
+    candidates: [(name, fn), ...] — fn بلا وسائط تعيد البيانات أو None
+    need: دالة تحقق اختيارية data -> bool (البيانات الفارغة = فشل)
+    يعيد (data, source_name) أو (None, None).
+
+    الشفاء الذاتي: المصدر الذي يفشل SOURCE_FAILS_TO_COOL مرات متتالية
+    يدخل تبريداً تلقائياً (يُتخطى حتى انتهاء التبريد، والتبريد يتضاعف
+    عند التكرار حتى SOURCE_COOLDOWN_MAX) ثم يُعاد اختباره وحده."""
+    src = s.setdefault("sources", {}).setdefault(key, {})
+    now = time.time()
+    for name, fn in candidates:
+        h = src.get(name) or {}
+        if now < float(h.get("cool_until") or 0):
+            continue  # في تبريد — نتخطاه دون إضاعة طلب
+        try:
+            data = fn()
+            ok = bool(data) and (need(data) if need else True)
+        except Exception:
+            ok, data = False, None
+        if ok:
+            h.update({"fails": 0, "cool_until": 0, "last_ok": now,
+                      "uses": int(h.get("uses") or 0) + 1})
+            src[name] = h
+            for n2, h2 in src.items():  # مصدر واحد نشط فقط لكل سلسلة
+                h2["active"] = (n2 == name)
+            return data, name
+        fails = int(h.get("fails") or 0) + 1
+        if fails >= SOURCE_FAILS_TO_COOL:
+            cd = min(SOURCE_COOLDOWN_BASE * (2 ** (fails - SOURCE_FAILS_TO_COOL)),
+                     SOURCE_COOLDOWN_MAX)
+            h["cool_until"] = now + cd
+        h["fails"] = fails
+        h["active"] = False
+        src[name] = h
+    return None, None
 
 _session = requests.Session()
 _session.headers.update({"User-Agent": BROWSER_UA,
@@ -61,6 +112,93 @@ def latest_boosts():
     return out
 
 
+def top_boosts():
+    """الأعلى ترويجاً مدفوعاً على Dexscreener (الأكثر سخونة الآن)."""
+    data = _get(f"{DEXSCREENER_API}/token-boosts/top/v1")
+    if not isinstance(data, list):
+        return []
+    out = []
+    for p in data:
+        if p.get("chainId") in CHAINS and p.get("tokenAddress"):
+            out.append((p["chainId"], p["tokenAddress"]))
+    return out
+
+
+def geckoterminal_tokens():
+    """عملات رائجة وجديدة من GeckoTerminal (مجاني بلا مفتاح، 30 طلب/دقيقة).
+
+    لكل شبكة: trending_pools + new_pools -> عناوين العملات الأساسية.
+    الفشل الصامت = المصدر يُتجاهل (لا يؤثر على باقي المصادر)."""
+    out = []
+    for net, chain in GECKO_NETWORKS.items():
+        for kind in ("trending_pools", "new_pools"):
+            try:
+                data = _get(f"{GECKOTERMINAL_API}/networks/{net}/{kind}")
+                items = (data or {}).get("data") or []
+                for it in items[:GECKO_POOL_LIMIT]:
+                    tid = (((it or {}).get("relationships") or {})
+                           .get("base_token", {}).get("data") or {}).get("id")
+                    if tid and "_" in tid:
+                        addr = tid.split("_", 1)[1]
+                        if addr:
+                            out.append((chain, addr))
+            except Exception:
+                continue
+    return out
+
+
+def reddit_mentions():
+    """ذكرات العملات ($TICKER) في أحدث منشورات Reddit (JSON عام بلا مفتاح).
+
+    يعيد قاموس {TICKER: عدد الذكرات}. الفشل = قاموس فارغ (تجاهل صامت)."""
+    counts = {}
+    for sub in REDDIT_SUBS:
+        try:
+            data = _get(f"https://www.reddit.com/r/{sub}/new/.json",
+                        params={"limit": REDDIT_LIMIT})
+            posts = ((data or {}).get("data") or {}).get("children") or []
+            for ch in posts:
+                d = (ch or {}).get("data") or {}
+                text = f"{d.get('title', '')} {d.get('selftext', '')}"
+                for m in re.findall(r"\$([A-Za-z]{2,10})\b", text):
+                    t = m.upper()
+                    counts[t] = counts.get(t, 0) + 1
+        except Exception:
+            continue
+    return counts
+
+
+def stocktwits_sentiment(symbol):
+    """مشاعر متداولي Stocktwits لعملة (API عام مجاني بلا مفتاح).
+
+    يعيد {'bullish': n, 'bearish': n} أو None (غير مدرجة/فشل = تجاهل صامت)."""
+    if not symbol:
+        return None
+    sym = symbol.upper().replace("USDT", "").strip()
+    if not sym or len(sym) > 12:
+        return None
+    try:
+        data = _get(f"https://api.stocktwits.com/api/2/streams/"
+                    f"symbol/{sym}.X.json")
+        msgs = (data or {}).get("messages") or []
+        if not msgs:
+            return None
+        bull = bear = 0
+        for m in msgs:
+            s = ((m.get("entities") or {}).get("sentiment") or {}).get("basic")
+            if s == "Bullish":
+                bull += 1
+            elif s == "Bearish":
+                bear += 1
+        if bull + bear == 0:
+            return None
+        return {"bullish": bull, "bearish": bear}
+    except Exception:
+        return None
+
+
+
+
 def pairs_for_tokens(tokens):
     """يجلب أزواج التداول لعناوين العملات (حتى 30 عنواناً في الطلب الواحد)."""
     by_chain = {}
@@ -85,6 +223,46 @@ def get_pair(chain, pair_address):
         return data["pairs"][0]
     except Exception:
         return None
+
+
+def gecko_pool(chain, pool_address):
+    """المصدر الاحتياطي الثاني لبيانات الزوج: GeckoTerminal.
+    يعيد قاموساً موحّداً فيه priceUsd وliquidity.usd (أو None)."""
+    net = GECKO_NETWORKS.get(chain)
+    if not net:
+        return None
+    data = _get(f"{GECKOTERMINAL_API}/networks/{net}/pools/{pool_address}")
+    try:
+        a = data["data"]["attributes"]
+        return {"priceUsd": a.get("base_token_price_usd"),
+                "liquidity": {"usd": a.get("reserve_in_usd")},
+                "volume": {"m5": a.get("volume_usd", {}).get("m5")},
+                "txns": {"m5": {"buys": (a.get("transactions", {})
+                                         .get("m5", {}).get("buys")),
+                                "sells": (a.get("transactions", {})
+                                          .get("m5", {}).get("sells"))},
+                         "h1": {"buys": (a.get("transactions", {})
+                                         .get("h1", {}).get("buys")),
+                                "sells": (a.get("transactions", {})
+                                          .get("h1", {}).get("sells"))}},
+                "_src": "geckoterminal"}
+    except Exception:
+        return None
+
+
+def pair_chain(s, chain, pair_address):
+    """سلسلة بيانات الزوج: DexScreener → GeckoTerminal.
+    إذا انتهى حدّ الأول أو سقط → الثاني يشتغل تلقائياً."""
+    def _has_price(d):
+        try:
+            return float((d or {}).get("priceUsd") or 0) > 0
+        except (TypeError, ValueError):
+            return False
+    return chain_try(
+        s, "pair",
+        [("dexscreener", lambda: get_pair(chain, pair_address)),
+         ("geckoterminal", lambda: gecko_pool(chain, pair_address))],
+        need=_has_price)
 
 
 # ---------- فحص أمان العقد (مجاني) ----------
@@ -214,6 +392,35 @@ def coingecko_trending():
     return out[:10]
 
 
+def coinpaprika_trending():
+    """المصدر الاحتياطي الثاني للعملات الرائجة: CoinPaprika (بلا مفتاح).
+    يرتب أكبر 100 عملة حسب تغير 24 ساعة ويعيد أول 10."""
+    data = _get(f"{COINPAPRIKA_API}/tickers", params={"limit": 100})
+    if not isinstance(data, list):
+        return []
+    rows = []
+    for t in data:
+        try:
+            chg = float(((t.get("quotes") or {}).get("USD") or {})
+                        .get("percent_change_24h") or 0)
+            sym = str(t.get("symbol") or "").upper()
+            if sym:
+                rows.append((chg, {"symbol": sym, "name": t.get("name", "")}))
+        except Exception:
+            continue
+    rows.sort(key=lambda r: r[0], reverse=True)
+    return [r[1] for r in rows[:10]]
+
+
+def trending_chain(s):
+    """سلسلة «الرائجة الآن»: CoinGecko → CoinPaprika."""
+    return chain_try(
+        s, "trending",
+        [("coingecko", coingecko_trending),
+         ("coinpaprika", coinpaprika_trending)],
+        need=lambda d: len(d or []) > 0)
+
+
 def coingecko_macro():
     """نبض السوق العام: سعر BTC وتغير 24س لـ BTC/ETH."""
     data = _get(f"{COINGECKO_API}/simple/price",
@@ -227,6 +434,32 @@ def coingecko_macro():
             "btc_chg": float(data["bitcoin"].get("usd_24h_change") or 0),
             "eth_chg": float(data["ethereum"].get("usd_24h_change") or 0),
         }
+    except Exception:
+        return None
+
+
+def kraken_btc():
+    """المصدر الاحتياطي الثالث لنبض BTC: Kraken العام (بلا مفتاح).
+    يعيد {"btc": السعر، "btc_chg": تغير 24س محسوب من متوسط السعر}."""
+    data = _get(f"{KRAKEN_API}/Ticker", params={"pair": "XBTUSD"})
+    try:
+        t = data["result"]["XXBTZUSD"]
+        last = float(t["c"][0])
+        vwap24 = float(t["p"][0])
+        chg = (last - vwap24) / vwap24 * 100 if vwap24 else 0
+        return {"btc": last, "btc_chg": round(chg, 2)}
+    except Exception:
+        return None
+
+
+def jupiter_price(mint):
+    """سعر عملة Solana الاحتياطي: Jupiter Price API (بلا مفتاح).
+    يُستخدم عندما يفشل جلب الزوج من المصدرين الأساسيين."""
+    if not mint:
+        return None
+    data = _get(JUPITER_PRICE_API, params={"ids": mint})
+    try:
+        return float(data[mint]["usdPrice"])
     except Exception:
         return None
 
@@ -245,9 +478,9 @@ def fear_greed():
 
 
 def verified_macro():
-    """نبض السوق مع التحقق المتبادل: يقارن تغير BTC بين CoinGecko وBinance.
-    إذا اتفق المصدران → الرقم موثوق. إذا تعارضا كثيراً → غير مؤكد
-    (الخبير لا يبني عليه أي تعديل)."""
+    """نبض السوق مع التحقق المتبادل بين 3 مصادر: CoinGecko وBinance وKraken.
+    إذا اتفق مصدران على الأقل (ضمن MACRO_VERIFY_MAX_DIFF) → الرقم موثوق.
+    مصدر واحد فقط → يُستخدم دون توثيق. إذا سقط مصدر → الآخران يغطيانه."""
     cg = coingecko_macro()
     cg_chg = (cg or {}).get("btc_chg")
     bn_chg = None
@@ -255,21 +488,32 @@ def verified_macro():
         bn_chg = float((binance_ticker("BTCUSDT") or {}).get("priceChangePercent"))
     except (TypeError, ValueError):
         bn_chg = None
+    kb = kraken_btc()
+    kb_chg = (kb or {}).get("btc_chg")
+    votes = [c for c in (cg_chg, bn_chg, kb_chg) if c is not None]
     btc_chg, verified = None, False
-    if cg_chg is not None and bn_chg is not None:
-        if abs(cg_chg - bn_chg) <= MACRO_VERIFY_MAX_DIFF:
-            btc_chg = round((cg_chg + bn_chg) / 2, 2)
-            verified = True
-        # else: تعارض بين المصدرين → لا نثق بالرقم
-    elif cg_chg is not None:
-        btc_chg = cg_chg
-    elif bn_chg is not None:
-        btc_chg = bn_chg
+    if len(votes) >= 2:
+        # أغلبية متفقة: ابحث عن زوج متفق ضمن الحد
+        best = None
+        for i in range(len(votes)):
+            for j in range(i + 1, len(votes)):
+                if abs(votes[i] - votes[j]) <= MACRO_VERIFY_MAX_DIFF:
+                    avg = (votes[i] + votes[j]) / 2
+                    if best is None or abs(votes[i] - votes[j]) < best[1]:
+                        best = (avg, abs(votes[i] - votes[j]))
+        if best is not None:
+            btc_chg, verified = round(best[0], 2), True
+        else:
+            btc_chg = round(sum(votes) / len(votes), 2)  # تعارض → متوسط حذر
+    elif votes:
+        btc_chg = votes[0]
     return {
-        "btc": (cg or {}).get("btc"),
+        "btc": (cg or {}).get("btc") or (kb or {}).get("btc"),
         "btc_chg": btc_chg,
         "eth_chg": (cg or {}).get("eth_chg"),
         "verified": verified,
+        "macro_sources": sum(1 for c in (cg_chg, bn_chg, kb_chg)
+                             if c is not None),
     }
 
 

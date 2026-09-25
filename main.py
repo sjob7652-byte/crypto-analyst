@@ -25,6 +25,7 @@ from config import (
     VOL_SPIKE_MULT, VOL_SPIKE_LOOKBACK, VOL_SPIKE_COOLDOWN_H,
     PAPER_ENABLED, PAPER_START_BALANCE, PAPER_RISK_PER_TRADE,
     PAPER_SELL_FRACTIONS, PAPER_SLIPPAGE, PAPER_MAX_OPEN,
+    DISCOVERY_TOKEN_CAP,
     CIRCUIT_BREAKER_SL_STREAK, CIRCUIT_BREAKER_HALT_H, SL_COOLDOWN_H,
     DEATH_LIQ_USD, DEATH_VOL_M5_USD, DEATH_NOBUY_MIN_SELLS,
     DEATH_CONFIRM_MIN, DEATH_MIN_AGE_H,
@@ -107,15 +108,20 @@ def build_context(s):
             print("xbridge error:", e)
     if USE_COINGECKO:
         try:
-            ctx["trending"] = clients.coingecko_trending()
+            # سلسلة احتياطية: CoinGecko → CoinPaprika (تلقائي)
+            tr, tr_src = clients.trending_chain(s)
+            ctx["trending"] = tr or []
+            if tr:
+                print(f"الرائجة الآن: {len(tr)} عملة [{tr_src}]")
         except Exception:
             pass
         try:
             ctx["macro"] = clients.verified_macro()
             m = ctx["macro"]
             if m and m.get("btc_chg") is not None:
-                v = "✓ مُتحقق من مصدرين" if m.get("verified") else "؟ غير مؤكد"
-                print(f"BTC: {m['btc_chg']:+.1f}% (24س) [{v}]")
+                nsrc = m.get("macro_sources", 2)
+                v = "✓ مُتحقق" if m.get("verified") else "؟ غير مؤكد"
+                print(f"BTC: {m['btc_chg']:+.1f}% (24س) [{v} من {nsrc} مصادر]")
         except Exception:
             pass
     if USE_FNG:
@@ -126,6 +132,16 @@ def build_context(s):
                       f"({ctx['fng']['label']})")
         except Exception:
             pass
+    # ضجة Reddit العضوية (ذكرات $TICKER — مصدر ناعم بحد أقصى)
+    try:
+        ctx["reddit"] = clients.reddit_mentions()
+        if ctx["reddit"]:
+            top = sorted(ctx["reddit"].items(), key=lambda kv: kv[1],
+                         reverse=True)[:3]
+            print(f"Reddit: {len(ctx['reddit'])} رمزاً مذكوراً "
+                  f"(أعلاها: {', '.join(f'${k}×{v}' for k, v in top)})")
+    except Exception:
+        pass
     ctx["band_stats"] = st.band_stats(s)
     return ctx
 
@@ -144,11 +160,18 @@ def make_verdict(res, ctx):
     macro = ctx.get("macro") or {}
     trending = [t.get("symbol") for t in (ctx.get("trending") or [])
                 if t.get("symbol")]
+    # مشاعر Stocktwits للعملة (تُجلب فقط للإشارات الحقيقية — ≤5 في الفحص)
+    social = None
+    try:
+        social = clients.stocktwits_sentiment(sym)
+    except Exception:
+        pass
     return expert.decide(res, coin_news, macro.get("btc_chg"),
                          ctx.get("band_stats"),
                          fng=ctx.get("fng"),
                          macro_verified=macro.get("verified", False),
-                         trending=trending)
+                         trending=trending, reddit=ctx.get("reddit"),
+                         social=social)
 
 
 def pick_best_pair(pairs):
@@ -196,16 +219,19 @@ def scan_new_coins(s, dry_run, ctx):
     print("=== فحص العملات الجديدة ===")
     profiles = clients.latest_profiles()
     boosts = clients.latest_boosts()
+    tops = clients.top_boosts()
+    gecko = clients.geckoterminal_tokens()
     boosted_set = {(c, a.lower()) for c, a in boosts}
-    tokens = profiles + boosts
+    tokens = profiles + boosts + tops + gecko
     seen, uniq = set(), []
     for t in tokens:
         if t not in seen:
             seen.add(t)
             uniq.append(t)
-    print(f"عناوين مرشحة: {len(uniq)} (منها {len(boosted_set)} بترويج مدفوع)")
+    print(f"عناوين مرشحة: {len(uniq)} (منها {len(boosted_set)} بترويج مدفوع، "
+          f"{len(tops)} أعلى ترويج، {len(gecko)} من GeckoTerminal)")
 
-    pairs = clients.pairs_for_tokens(uniq[:90])
+    pairs = clients.pairs_for_tokens(uniq[:DISCOVERY_TOKEN_CAP])
     now_ms = time.time() * 1000
     cands = []
     for p in pick_best_pair(pairs):
@@ -315,7 +341,7 @@ def check_waitlist(s, dry_run, ctx):
         if now - e["added"] > WAITLIST_MAX_AGE_H * 3600:
             wl.pop(wid, None)
             continue
-        p = clients.get_pair(e["chain"], e["pair"])
+        p, _wl_src = clients.pair_chain(s, e["chain"], e["pair"])
         if not p:
             e["checks"] += 1
             if e["checks"] >= 3:
@@ -600,7 +626,7 @@ def _update_one_paper_position(s, p, pid, pos, closed, partials, dry_run):
     # انتهاء مدة المتابعة (time-stop): يُفحص أولاً — حتى لو تعذّر جلب
     # السعر الحالي، الصفقة العتيقة تُغلق (بسعر الدخول) ولا تبقى عالقة للأبد
     if time.time() - pos["entry_time"] > POSITION_MAX_AGE_H * 3600:
-        price_now, _liq = current_price(pos)
+        price_now, _liq = current_price(s, pos)
         eff_price = (price_now * (1 - PAPER_SLIPPAGE)
                      if price_now else pos["entry"])
         pnl, _proceeds = _paper_close(p, pid, pos, eff_price, "EXPIRED",
@@ -614,7 +640,7 @@ def _update_one_paper_position(s, p, pid, pos, closed, partials, dry_run):
             p["cash"]),
             dry_run)
         return
-    price, _liq = current_price(pos)
+    price, _liq = current_price(s, pos)
     if not price:
         return
     entry = pos["entry"]
@@ -702,7 +728,7 @@ def _update_one_paper_position(s, p, pid, pos, closed, partials, dry_run):
     # بدل انتظار وقف -60% أو انتهاء 14 يوماً. إشارة واحدة = مراقبة فقط.
     if pos.get("kind") == "dex":
         try:
-            pair = clients.get_pair(pos["chain"], pos["pair"])
+            pair, _ds_src = clients.pair_chain(s, pos["chain"], pos["pair"])
         except Exception:
             pair = None
         if pair:
@@ -758,7 +784,7 @@ def paper_summary(s):
     p = s["paper"]
     invested = 0.0
     for pos in p["positions"].values():
-        price, _liq = current_price(pos)
+        price, _liq = current_price(s, pos)
         invested += (pos["qty"] * (price or pos["entry"]))
     total = p["cash"] + invested
     pnl = total - p["start"]
@@ -772,14 +798,21 @@ def paper_summary(s):
     }
 
 
-def current_price(pos):
+def current_price(s, pos):
+    """السعر الحالي عبر سلسلة احتياطية: DexScreener → GeckoTerminal →
+    (لـ Solana) Jupiter. إذا سقط مصدر → التالي يشتغل تلقائياً."""
     try:
         if pos["kind"] == "dex":
-            p = clients.get_pair(pos["chain"], pos["pair"])
-            if not p:
-                return None, None
-            return (float(p.get("priceUsd") or 0),
-                    float((p.get("liquidity") or {}).get("usd") or 0))
+            p, _src = clients.pair_chain(s, pos["chain"], pos["pair"])
+            if p:
+                return (float(p.get("priceUsd") or 0),
+                        float((p.get("liquidity") or {}).get("usd") or 0))
+            # الملاذ الأخير لعملات Solana: سعر Jupiter المباشر
+            if pos.get("chain") == "solana" and pos.get("mint"):
+                jp = clients.jupiter_price(pos["mint"])
+                if jp:
+                    return float(jp), 0
+            return None, None
         t = clients.binance_ticker(pos["symbol"])
         if not t:
             return None, None
@@ -792,7 +825,7 @@ def update_positions(s, dry_run):
     print("=== متابعة الصفقات المفتوحة ===")
     closed = []
     for pid, pos in list(s["positions"].items()):
-        price, liq = current_price(pos)
+        price, liq = current_price(s, pos)
         if not price:
             continue
         entry = pos["entry"]
@@ -845,7 +878,7 @@ def update_positions(s, dry_run):
         # إعادة تقييم الصفقة: هل المؤشرات ساءت من بعد الدخول؟
         if (pos["kind"] == "dex" and not pos.get("deteriorated_warned")
                 and time.time() - pos["entry_time"] > POS_REEVAL_MIN_AGE_H * 3600):
-            pp = clients.get_pair(pos["chain"], pos["pair"])
+            pp, _rv_src = clients.pair_chain(s, pos["chain"], pos["pair"])
             if pp:
                 rr = analyzer.analyze_pair(pp, None)
                 if rr["score"] < POS_REEVAL_MIN_SCORE:
@@ -939,7 +972,7 @@ def maybe_digest(s, dry_run, movers, ctx):
     s["stats"]["digest_sent"] = sent_key
     positions = []
     for pid, pos in s["positions"].items():
-        price, _ = current_price(pos)
+        price, _ = current_price(s, pos)
         if price:
             positions.append({"name": pos["name"], "entry": pos["entry"],
                               "price": price})

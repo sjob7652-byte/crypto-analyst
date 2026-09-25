@@ -9,7 +9,9 @@
 """
 from config import (TAKE_PROFITS, STOP_LOSS, MIN_SAMPLES_FOR_LEARNING,
                     WASH_RATIO_LIMIT, BUY_PRESSURE_STRONG, BUY_PRESSURE_WEAK,
-                    FDV_LIQ_RATIO_LIMIT, TRENDING_PROB_BOOST)
+                    FDV_LIQ_RATIO_LIMIT, TRENDING_PROB_BOOST,
+                    REDDIT_MIN_MENTIONS, REDDIT_PROB_BOOST,
+                    STOCKTWITS_MIN_MSGS, STOCKTWITS_PROB_BOOST)
 
 
 def band_of(score):
@@ -56,7 +58,8 @@ def verdict_word(prob):
     return "مخاطرة عالية", "🔴"
 
 
-def simple_reasons(res, coin_news, fng=None, trending=None):
+def simple_reasons(res, coin_news, fng=None, trending=None, reddit=None,
+                   social=None):
     """أسباب بسيطة بكلمات سهلة — أقوى 3 إشارات فقط."""
     m = res.get("metrics") or {}
     out = []
@@ -108,6 +111,20 @@ def simple_reasons(res, coin_news, fng=None, trending=None):
     if sym and sym in tr:
         out.append("رائجة الآن على CoinGecko — ناس كثيرة كتقلب عليها")
 
+    # ضجة Reddit: ذكرات متكررة في منشورات الميمكوينز
+    if reddit and sym and reddit.get(sym, 0) >= REDDIT_MIN_MENTIONS:
+        out.append("ناس كيتكلمو عليها بزاف في Reddit هاد الساعات")
+
+    # مشاعر Stocktwits: إجماع واضح فقط
+    if social:
+        b = social.get("bullish", 0) or 0
+        be = social.get("bearish", 0) or 0
+        if b + be >= STOCKTWITS_MIN_MSGS:
+            if b >= be * 2:
+                out.append("متداولو Stocktwits متفائلون بها بقوة")
+            elif be >= b * 2:
+                out.append("متداولو Stocktwits متشائمون منها — كن حذراً")
+
     # مؤشر الخوف والطمع: تحذير بسيط عند التطرف
     fng_v = None
     if isinstance(fng, dict):
@@ -127,13 +144,15 @@ def simple_reasons(res, coin_news, fng=None, trending=None):
 
 
 def decide(res, coin_news, btc_chg, band_stats, fng=None, macro_verified=True,
-           trending=None):
+           trending=None, reddit=None, social=None):
     """يبني القرار النهائي: أسعار + نسبة نجاح + سبب + خبر.
 
     res: نتيجة analyzer | coin_news: أخبار تذكر العملة (من مصادر موثوقة فقط)
     btc_chg: تغير BTC في 24س (نبض السوق) | band_stats: إحصائيات الذاكرة
     fng: مؤشر الخوف والطمع | macro_verified: هل رقم BTC مُتحقق من مصدرين؟
     trending: رموز العملات الرائجة على CoinGecko
+    reddit: قاموس {TICKER: عدد الذكرات} من Reddit (ضجة عضوية)
+    social: {'bullish': n, 'bearish': n} من Stocktwits (مشاعر المتداولين)
     """
     m = res.get("metrics") or {}
     entry = float(m.get("price") or 0)
@@ -200,6 +219,21 @@ def decide(res, coin_news, btc_chg, band_stats, fng=None, macro_verified=True,
     if sym_u and sym_u in {str(t).upper() for t in (trending or [])}:
         prob += TRENDING_PROB_BOOST
 
+    # 2ح) ضجة Reddit العضوية: ذكرات متكررة = ناس حقيقيون يتكلمون عنها
+    # (عامل ناعم بحد أقصى — لا يغيّر القرار وحده)
+    if reddit and sym_u and reddit.get(sym_u, 0) >= REDDIT_MIN_MENTIONS:
+        prob += REDDIT_PROB_BOOST
+
+    # 2ط) مشاعر Stocktwits: إجماع واضح = إشارة، الانقسام = ضجيج يُتجاهل
+    if social:
+        b = social.get("bullish", 0) or 0
+        be = social.get("bearish", 0) or 0
+        if b + be >= STOCKTWITS_MIN_MSGS:
+            if b >= be * 2:
+                prob += STOCKTWITS_PROB_BOOST
+            elif be >= b * 2:
+                prob -= STOCKTWITS_PROB_BOOST
+
     # 3) ذاكرة الخبير: ماذا حصل فعلاً مع إشارات بنفس الفئة؟
     band = band_of(score)
     bs = (band_stats or {}).get(band)
@@ -227,7 +261,7 @@ def decide(res, coin_news, btc_chg, band_stats, fng=None, macro_verified=True,
         "emoji": emoji,
         "band": band,
         "learned": learned,
-        "reason": simple_reasons(res, coin_news, fng, trending),
+        "reason": simple_reasons(res, coin_news, fng, trending, reddit, social),
         "news": top_news,
         "warn": warn,
         "fng": fng_v,

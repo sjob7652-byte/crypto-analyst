@@ -64,15 +64,54 @@ NEWS_FEEDS = [
     ("The Block", "https://www.theblock.co/rss.xml", 2),
     ("Decrypt", "https://decrypt.co/feed", 2),
     ("CryptoSlate", "https://cryptoslate.com/feed/", 2),
+    ("DL News", "https://www.dlnews.com/rss", 2),
+    ("The Defiant", "https://thedefiant.io/api/feed", 2),
     # الطبقة 3: مصادر كريبتو عامة
     ("Bitcoin Magazine", "https://bitcoinmagazine.com/.rss/full/", 3),
     ("CoinJournal", "https://coinjournal.net/rss/", 3),
     ("Investing.com", "https://www.investing.com/rss/news_25.rss", 3),
+    ("CoinGape", "https://coingape.com/feed/", 3),
+    ("NewsBTC", "https://www.newsbtc.com/feed/", 3),
+    ("Bitcoinist", "https://bitcoinist.com/feed/", 3),
+    ("AMBCrypto", "https://ambcrypto.com/feed/", 3),
+    ("U.Today", "https://u.today/rss.php", 3),
+    ("CryptoPotato", "https://cryptopotato.com/feed/", 3),
+    ("BeInCrypto", "https://beincrypto.com/feed/", 3),
+    ("Coinpedia", "https://coinpedia.org/feed/", 3),
+    ("DailyCoin", "https://dailycoin.com/feed/", 3),
+    ("ZyCrypto", "https://zycrypto.com/feed/", 3),
 ]
 NEWS_LOOKBACK_HOURS = 12   # أخبار آخر 12 ساعة فقط
 NEWS_MAX_ITEMS = 40
 NEWS_MIN_TITLE_LEN = 25    # تجاهل العناوين القصيرة/الفارغة (ضجيج)
 NEWS_DEDUPE_SIM = 0.85     # دمج الأخبار المتشابهة فوق هذه النسبة
+
+# ===== مصادر اكتشاف مجانية جديدة (بلا مفاتيح ولا تسجيل) =====
+GECKOTERMINAL_API = "https://api.geckoterminal.com/api/v2"
+# خريطة شبكات GeckoTerminal -> chainId المستعمل في البوت
+GECKO_NETWORKS = {"solana": "solana", "bsc": "bsc", "base": "base",
+                  "eth": "ethereum"}
+GECKO_POOL_LIMIT = 10       # أزواج لكل شبكة من كل قائمة (رائجة/جديدة)
+DISCOVERY_TOKEN_CAP = 120   # سقف العناوين قبل جلب الأزواج (كان 90)
+
+# ===== سلاسل المصادر الاحتياطية (failover): 1→2→3→4→5 تلقائياً =====
+# كل حاجة (سعر زوج، رائج، ماكرو) لها سلسلة مصادر مرتبة بالأولوية.
+# المحرك يجرّب الأول، فإذا فشل/انتهى حدّه انتقل للثاني فوراً دون تدخل.
+# المصدر الذي يفشل FAILS_TO_COOL مرات متتالية يدخل «تبريداً» تلقائياً
+# (يُتخطى حتى انتهاء التبريد) ثم يُعاد اختباره وحده — شفاء ذاتي كامل.
+SOURCE_FAILS_TO_COOL = 2    # فشلتان متتاليتان = تبريد
+SOURCE_COOLDOWN_BASE = 300  # تبريد أساسي: 5 دقائق (يتضاعف عند التكرار)
+SOURCE_COOLDOWN_MAX = 3600  # أقصى تبريد: ساعة واحدة
+
+# ضجة Reddit العضوية (JSON عام، بلا مفتاح)
+REDDIT_SUBS = ["CryptoMoonShots", "memecoins"]
+REDDIT_LIMIT = 40           # منشور لكل subreddit
+REDDIT_MIN_MENTIONS = 3     # ≥3 ذكرات = اهتمام حقيقي
+REDDIT_PROB_BOOST = 4       # بحد أقصى +4% على الاحتمال
+
+# مشاعر Stocktwits (API عام مجاني بلا مفتاح)
+STOCKTWITS_MIN_MSGS = 5     # حد أدنى للرسائل المصنّفة قبل الاعتماد
+STOCKTWITS_PROB_BOOST = 3   # ±3% كحد أقصى على الاحتمال
 NEWS_MIN_TIER_FOR_COIN = 2  # أخبار العملات: فقط الطبقتان 1 و2 (الأكثر ثقة)
 
 # ---------- تنقية البيانات: مؤشر الخوف والطمع + التحقق المتبادل للأسعار ----------
