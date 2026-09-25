@@ -564,7 +564,8 @@ def _update_one_paper_position(s, p, pid, pos, closed, partials, dry_run):
         alerts.send(alerts.paper_closed_msg(
             pos["name"], pnl,
             pnl / pos["invested"] * 100 if pos["invested"] else 0,
-            "⏱️ انتهاء المدة (time-stop: 30 ساعة بلا هدف)", p["cash"]),
+            f"⏱️ انتهاء المدة (time-stop: {POSITION_MAX_AGE_H} ساعة بلا هدف)",
+            p["cash"]),
             dry_run)
         return
     price, _liq = current_price(pos)
@@ -579,9 +580,8 @@ def _update_one_paper_position(s, p, pid, pos, closed, partials, dry_run):
     # سعر التنفيذ الواقعي عند البيع (أرخص بسبب الانزلاق) — التفعيل يبقى
     # على سعر السوق الخام، لكن التنفيذ الفعلي ينزلق
     eff_price = price * (1 - PAPER_SLIPPAGE)
-    # الهدف الوحيد (+30%): خروج كامل فوري عند تحققه
-    # (PAPER_SELL_FRACTIONS=1.0 — البيانات أثبتت أن الخروج الكامل أربح
-    # من الجني الجزئي 50% + وقف التعادل)
+    # نظام الاستثمار: هدف1 +100% (بيع 50% + وقف التعادل للباقي)،
+    # هدف2 +300% (خروج كامل للباقي)
     for i, tp in enumerate(TAKE_PROFITS):
         if not pos["tp_hit"][i] and price >= entry * (1 + tp):
             pos["tp_hit"][i] = True
@@ -591,14 +591,15 @@ def _update_one_paper_position(s, p, pid, pos, closed, partials, dry_run):
                 # يُحتسب فوزاً كاملاً (أرشيف + عدّادات + حماية)، ولا يبقى
                 # "هيكل" بكمية صفرية يشغل مكاناً في المحفظة حتى انتهاء المدة
                 pnl, _proceeds = _paper_close(p, pid, pos, eff_price,
-                                              "TP1", s, dry_run)
+                                              f"TP{i + 1}", s, dry_run)
                 closed.append(pid)
-                print(f"  -> وهمي: 🎯 هدف +30% {pos['name']} (${pnl:+.2f}) "
-                      f"— خروج كامل")
+                print(f"  -> وهمي: 🎯 هدف +{tp * 100:.0f}% {pos['name']} "
+                      f"(${pnl:+.2f}) — خروج كامل")
                 alerts.send(alerts.paper_closed_msg(
                     pos["name"], pnl,
                     pnl / pos["invested"] * 100 if pos["invested"] else 0,
-                    "🎯 الهدف +30%: خروج كامل", p["cash"]), dry_run)
+                    f"🎯 الهدف +{tp * 100:.0f}%: خروج كامل", p["cash"]),
+                    dry_run)
                 break
             sell_qty = pos["qty"] * frac
             proceeds = sell_qty * eff_price
@@ -611,7 +612,7 @@ def _update_one_paper_position(s, p, pid, pos, closed, partials, dry_run):
                   f"(+${part_pnl:.2f} محقق) — وقف الخسارة → الدخول")
             # أرشفة الجني الجزئي كحدث مستقل (partial: يُستثنى من مجاميع
             # الربح/النجاح في الداشبورد — الإغلاق النهائي يحسب الكل)
-            _archive_closed(p, pos, eff_price, part_pnl, "TP1",
+            _archive_closed(p, pos, eff_price, part_pnl, f"TP{i + 1}",
                             invested_override=sell_qty * entry,
                             partial=True)
             partials.append(pid)
@@ -626,7 +627,7 @@ def _update_one_paper_position(s, p, pid, pos, closed, partials, dry_run):
             break
     if pid in closed:
         return
-    # وقف الخسارة: بعد الجني ينتقل لسعر الدخول (تعادل) — قبل الجني -15%
+    # وقف الخسارة: بعد الجني ينتقل لسعر الدخول (تعادل) — قبل الجني -60%
     # (خسارة ≥70% فجأة → "انهيار" Rug Pull بدل وقف الخسارة العادي)
     stop = entry if pos.get("be") else entry * (1 - STOP_LOSS)
     if price <= stop:
@@ -731,7 +732,7 @@ def update_positions(s, dry_run):
         pos["tp_hit"] = (th + [False] * len(TAKE_PROFITS))[:len(TAKE_PROFITS)]
         if pos["tp_hit"][0] and not pos.get("be"):
             pos["be"] = True
-        # الهدف الوحيد (+30%): تنبيه + نقل وقف الخسارة لسعر الدخول
+        # نظام الاستثمار: تنبيه عند الأهداف + نقل وقف الخسارة لسعر الدخول
         for i, tp in enumerate(TAKE_PROFITS):
             if not pos["tp_hit"][i] and price >= entry * (1 + tp):
                 pos["tp_hit"][i] = True
@@ -1034,9 +1035,9 @@ def _monitor(a):
 
     يستعمل نفس دوال المتابعة بالضبط المستعملة في الفحص الكامل
     (update_positions للصفقات المتابعة + update_paper للمحفظة الوهمية) —
-    نفس القواعد: الهدف الوحيد +30% (خروج كامل فوري)،
-    وقف الخسارة -15%، الانهيار، وانتهاء
-    المدة 30h — لكن بلا build_context الثقيل وبلا اكتشاف عملات جديدة
+    نفس القواعد: هدف1 +100% (بيع 50%)، هدف2 +300% (خروج كامل)،
+    وقف الخسارة -60%، الانهيار، وانتهاء
+    المدة 14 يوماً — لكن بلا build_context الثقيل وبلا اكتشاف عملات جديدة
     وبلا شراء وبلا ملخصات. النتيجة: دقة الخروج ~دقيقة بدل ~دقيقتين،
     بتكلفة بضعة طلبات API فقط (سعر كل صفقة مفتوحة)."""
     s = st.load()
