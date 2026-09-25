@@ -458,6 +458,12 @@ def paper_buy(s, res, verdict=None):
         # دقة الفلتر لاحقاً (هل الرابحون فعلاً أعلى نقاطاً؟)
         "entry_score": res.get("score"),
         "entry_prob": (verdict or {}).get("prob"),
+        # القياس البحثي (2026-09-25): مقاييس لحظة الدخول — قراءة فقط،
+        # تُحفظ في الأرشيف عند الإغلاق لقياس علاقتها بالنتائج
+        # (هل الرابحون أقل ATR؟ حجم متسارع؟ ضغط شراء أعلى؟)
+        "m_atr_pct": m.get("atr_pct"),
+        "m_vol_mult": m.get("vol_mult"),
+        "m_buy_pressure": m.get("buy_pressure"),
     }
     p["trades"] += 1
     print(f"  -> محفظة وهمية: شراء {res['display']} بـ ${amount:.2f} "
@@ -493,6 +499,11 @@ def _archive_closed(p, pos, exit_price, pnl, reason, invested_override=None,
         # معايير الدخول الموثقة — لتحليل دقة الفلتر في المراجعات القادمة
         "entry_score": pos.get("entry_score"),
         "entry_prob": pos.get("entry_prob"),
+        # القياس البحثي (2026-09-25): مقاييس لحظة الدخول — لتحليل علاقتها
+        # بالنتائج (هل الرابحون أقل ATR؟ حجم متسارع؟ ضغط شراء أعلى؟)
+        "m_atr_pct": pos.get("m_atr_pct"),
+        "m_vol_mult": pos.get("m_vol_mult"),
+        "m_buy_pressure": pos.get("m_buy_pressure"),
     }
     arch = p.setdefault("closed_trades", [])
     arch.append(rec)

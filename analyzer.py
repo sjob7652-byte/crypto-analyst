@@ -5,7 +5,7 @@ from config import (
     SCORE_STRONG_BUY, SCORE_BUY, SCORE_WATCH,
     MIN_LIQUIDITY_USD, MIN_VOLUME_24H_USD, MAX_PAIR_AGE_DAYS,
     WASH_RATIO_LIMIT, HOLDER_TOP10_REJECT, ZERO_WIDTH_CHARS, KNOWN_SYMBOLS,
-    FDV_LIQ_RATIO_LIMIT, SECURITY_FAILSAFE_REJECT,
+    FDV_LIQ_RATIO_LIMIT, SECURITY_FAILSAFE_REJECT, INSTRUMENT_METRICS,
 )
 
 
@@ -29,6 +29,52 @@ def _f(x, default=0.0):
         return float(x)
     except (TypeError, ValueError):
         return default
+
+
+def _atr_pct(klines, period=14):
+    """متوسط المدى الحقيقي ATR(14) كنسبة من السعر — مقياس التقلب.
+    (بحث 2026-09-25: الوقف الأمثل = max(20%، 2.5×ATR) — القياس الآن،
+    القرار لاحقاً بعد جمع الأدلة. يعيد None عند نقص البيانات.)"""
+    try:
+        if not klines or len(klines) < period + 1:
+            return None
+        trs = []
+        prev_close = float(klines[-(period + 1)][4])
+        for k in klines[-period:]:
+            high, low, close = float(k[2]), float(k[3]), float(k[4])
+            trs.append(max(high - low, abs(high - prev_close),
+                           abs(low - prev_close)))
+            prev_close = close
+        atr = sum(trs) / len(trs)
+        last = float(klines[-1][4])
+        return round(atr / last * 100, 2) if last else None
+    except (TypeError, ValueError, IndexError, ZeroDivisionError):
+        return None
+
+
+def _vol_mult(klines, recent=6, baseline=18):
+    """حجم الساعات الأخيرة مقابل متوسط الساعات السابقة.
+    (بحث: >1.5× خط الأساس = إشارة زخم. يعيد None عند نقص البيانات.)"""
+    try:
+        vols = [float(k[5]) for k in klines if len(k) > 5]
+        if len(vols) < recent + baseline:
+            return None
+        rec = sum(vols[-recent:]) / recent
+        base = sum(vols[-(recent + baseline):-recent]) / baseline
+        return round(rec / base, 2) if base > 0 else None
+    except (TypeError, ValueError, IndexError, ZeroDivisionError):
+        return None
+
+
+def _buy_pressure(klines):
+    """نسبة حجم الشراء (taker buy) من إجمالي الحجم خلال 24س.
+    (بحث: ≥0.6 ضغط شراء إيجابي. يعيد None عند نقص البيانات.)"""
+    try:
+        tot = sum(float(k[7]) for k in klines if len(k) > 10)
+        tb = sum(float(k[10]) for k in klines if len(k) > 10)
+        return round(tb / tot, 3) if tot > 0 else None
+    except (TypeError, ValueError, IndexError, ZeroDivisionError):
+        return None
 
 
 def signal_of(score):
@@ -272,6 +318,17 @@ def analyze_binance(symbol, ticker, klines):
             warnings.append("تقلبات عنيفة — الدخول مخاطرة")
 
     score = min(100, score)
+    metrics = {"price": last, "liq": 0, "vol24": qvol,
+               "pc1h": 0, "pc24h": chg, "buys": 0, "sells": 0,
+               "age_h": 99999}
+    # القياس البحثي (2026-09-25): مقاييس لحظة التقييم — قراءة فقط،
+    # لا تغيّر النقاط ولا الإشارة ولا أي قرار. تُحفظ في الصفقة والأرشيف
+    # لقياس علاقتها بالنتائج لاحقاً (هل الرابحون أقل ATR؟ ضغط شراء أعلى؟).
+    # صفر طلبات API إضافية: كلها من الشموع المحمّلة أصلاً.
+    if INSTRUMENT_METRICS:
+        metrics["atr_pct"] = _atr_pct(klines)
+        metrics["vol_mult"] = _vol_mult(klines)
+        metrics["buy_pressure"] = _buy_pressure(klines)
     return {
         "score": score,
         "signal": signal_of(score),
@@ -279,6 +336,5 @@ def analyze_binance(symbol, ticker, klines):
         "warnings": warnings,
         "display": f"{name}/USDT",
         "pair_url": f"https://www.binance.com/en/trade/{name}_USDT",
-        "metrics": {"price": last, "liq": 0, "vol24": qvol,
-                    "pc1h": 0, "pc24h": chg, "buys": 0, "sells": 0, "age_h": 99999},
+        "metrics": metrics,
     }
