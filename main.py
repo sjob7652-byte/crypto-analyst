@@ -454,6 +454,10 @@ def paper_buy(s, res, verdict=None):
         "invested": amount,
         "realized": 0.0,
         "tp_hit": [False] * len(TAKE_PROFITS),
+        # توثيق معايير الدخول: تُحفظ في الأرشيف عند الإغلاق لقياس
+        # دقة الفلتر لاحقاً (هل الرابحون فعلاً أعلى نقاطاً؟)
+        "entry_score": res.get("score"),
+        "entry_prob": (verdict or {}).get("prob"),
     }
     p["trades"] += 1
     print(f"  -> محفظة وهمية: شراء {res['display']} بـ ${amount:.2f} "
@@ -486,6 +490,9 @@ def _archive_closed(p, pos, exit_price, pnl, reason, invested_override=None,
         "partial": bool(partial),
         "entry_time": pos.get("entry_time"),
         "close_time": time.time(),
+        # معايير الدخول الموثقة — لتحليل دقة الفلتر في المراجعات القادمة
+        "entry_score": pos.get("entry_score"),
+        "entry_prob": pos.get("entry_prob"),
     }
     arch = p.setdefault("closed_trades", [])
     arch.append(rec)
@@ -561,18 +568,35 @@ def _update_one_paper_position(s, p, pid, pos, closed, partials, dry_run):
     # سعر التنفيذ الواقعي عند البيع (أرخص بسبب الانزلاق) — التفعيل يبقى
     # على سعر السوق الخام، لكن التنفيذ الفعلي ينزلق
     eff_price = price * (1 - PAPER_SLIPPAGE)
-    # الهدف الوحيد (+30%): بيع 50% فوراً + نقل وقف الخسارة لسعر الدخول
+    # الهدف الوحيد (+30%): خروج كامل فوري عند تحققه
+    # (PAPER_SELL_FRACTIONS=1.0 — البيانات أثبتت أن الخروج الكامل أربح
+    # من الجني الجزئي 50% + وقف التعادل)
     for i, tp in enumerate(TAKE_PROFITS):
         if not pos["tp_hit"][i] and price >= entry * (1 + tp):
             pos["tp_hit"][i] = True
-            sell_qty = pos["qty"] * PAPER_SELL_FRACTIONS[i]
+            frac = PAPER_SELL_FRACTIONS[i]
+            if frac >= 1.0 - 1e-9:
+                # بيع 100%: إغلاق نهائي فوري عبر المسار المركزي —
+                # يُحتسب فوزاً كاملاً (أرشيف + عدّادات + حماية)، ولا يبقى
+                # "هيكل" بكمية صفرية يشغل مكاناً في المحفظة حتى انتهاء المدة
+                pnl, _proceeds = _paper_close(p, pid, pos, eff_price,
+                                              "TP1", s, dry_run)
+                closed.append(pid)
+                print(f"  -> وهمي: 🎯 هدف +30% {pos['name']} (${pnl:+.2f}) "
+                      f"— خروج كامل")
+                alerts.send(alerts.paper_closed_msg(
+                    pos["name"], pnl,
+                    pnl / pos["invested"] * 100 if pos["invested"] else 0,
+                    "🎯 الهدف +30%: خروج كامل", p["cash"]), dry_run)
+                break
+            sell_qty = pos["qty"] * frac
             proceeds = sell_qty * eff_price
             part_pnl = proceeds - sell_qty * entry
             pos["qty"] -= sell_qty
             pos["realized"] += part_pnl
             pos["be"] = True  # 🛡️ النصف المتبقي أصبح خالي المخاطر
             p["cash"] += proceeds
-            print(f"  -> وهمي: جني جزئي 50% {pos['name']} "
+            print(f"  -> وهمي: جني جزئي {frac*100:.0f}% {pos['name']} "
                   f"(+${part_pnl:.2f} محقق) — وقف الخسارة → الدخول")
             # أرشفة الجني الجزئي كحدث مستقل (partial: يُستثنى من مجاميع
             # الربح/النجاح في الداشبورد — الإغلاق النهائي يحسب الكل)
@@ -989,8 +1013,8 @@ def _monitor(a):
 
     يستعمل نفس دوال المتابعة بالضبط المستعملة في الفحص الكامل
     (update_positions للصفقات المتابعة + update_paper للمحفظة الوهمية) —
-    نفس القواعد: الهدف الوحيد +30% (جني 50% + نقل الوقف للدخول)،
-    وقف الخسارة -15% (أو عند الدخول بعد الجني)، الانهيار، وانتهاء
+    نفس القواعد: الهدف الوحيد +30% (خروج كامل فوري)،
+    وقف الخسارة -15%، الانهيار، وانتهاء
     المدة 30h — لكن بلا build_context الثقيل وبلا اكتشاف عملات جديدة
     وبلا شراء وبلا ملخصات. النتيجة: دقة الخروج ~دقيقة بدل ~دقيقتين،
     بتكلفة بضعة طلبات API فقط (سعر كل صفقة مفتوحة)."""
