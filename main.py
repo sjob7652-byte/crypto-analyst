@@ -26,6 +26,8 @@ from config import (
     PAPER_ENABLED, PAPER_START_BALANCE, PAPER_RISK_PER_TRADE,
     PAPER_SELL_FRACTIONS, PAPER_SLIPPAGE, PAPER_MAX_OPEN,
     CIRCUIT_BREAKER_SL_STREAK, CIRCUIT_BREAKER_HALT_H, SL_COOLDOWN_H,
+    DEATH_LIQ_USD, DEATH_VOL_M5_USD, DEATH_NOBUY_MIN_SELLS,
+    DEATH_CONFIRM_MIN, DEATH_MIN_AGE_H,
     USE_XBRIDGE, XBRIDGE_MAX_AGE_H,
     MIN_PROBABILITY, OPS_INBOX_ENABLED,
 )
@@ -476,7 +478,7 @@ def _archive_closed(p, pos, exit_price, pnl, reason, invested_override=None,
     """ينقل الصفقة المغلقة إلى الأرشيف مع كل تفاصيلها — لا تُحذف أبداً.
     reason: TP1 (جني جزئي 50%) | BE (تعادل: خروج عند الدخول بعد الجني) |
             TP (اكتمال الأهداف) | SL (وقف الخسارة) | RUG (انهيار) |
-            EXPIRED (انتهاء المدة).
+            EXPIRED (انتهاء المدة) | DEAD (إشارات موت العملة المؤكدة).
     invested_override: للجني الجزئي — تُحسب النسبة على الجزء المُباع فقط.
     partial=True: حدث جزئي (جني TP1) — الداشبورد يعرضه لكنه يستثنيه من
     مجاميع الربح ونسبة النجاح، لأن الإغلاق النهائي يحسب الربح الكلي
@@ -547,6 +549,50 @@ def _paper_close(p, pid, pos, eff_price, arch, s, dry_run):
     # الأرشفة إجبارية — لا إغلاق دون سجل
     _archive_closed(p, pos, eff_price, pnl, arch)
     return pnl, proceeds
+
+
+def _death_signals(pos, pair, now):
+    """إشارات موت العملة من بيانات DexScreener — تُرجع [(الاسم, الوصف)]
+    للإشارات *المؤكدة* فقط (استمرت DEATH_CONFIRM_MIN دقيقة).
+    لا تُطبَّق قبل DEATH_MIN_AGE_H ساعة من الدخول."""
+    if (now - pos["entry_time"]) / 3600 < DEATH_MIN_AGE_H:
+        return []
+    track = pos.setdefault("death", {})  # الاسم -> أول ظهور (timestamp)
+    cands = {}
+    try:
+        liq = float((pair.get("liquidity") or {}).get("usd") or 0)
+    except (TypeError, ValueError):
+        liq = 0
+    # liq == 0 تعني "بيانات ناقصة" لا "سيولة صفر" — لا إشارة كاذبة
+    if liq > 0 and liq < DEATH_LIQ_USD:
+        cands["LIQ"] = f"السيولة ${liq:,.0f} < ${DEATH_LIQ_USD:,}"
+    vol = (pair.get("volume") or {}).get("m5")
+    try:
+        vol = float(vol) if vol is not None else None
+    except (TypeError, ValueError):
+        vol = None
+    if vol is not None and vol < DEATH_VOL_M5_USD:
+        cands["VOL"] = f"حجم 5د ${vol:,.0f} < ${DEATH_VOL_M5_USD:,}"
+    tx = (pair.get("txns") or {}).get("m5") or {}
+    try:
+        buys = int(tx.get("buys") or 0)
+        sells = int(tx.get("sells") or 0)
+    except (TypeError, ValueError):
+        buys, sells = 0, 0
+    if buys == 0 and sells >= DEATH_NOBUY_MIN_SELLS:
+        cands["NOBUY"] = f"صفر شراء / {sells} بيع في 5 دقائق"
+    confirmed = []
+    for name, desc in cands.items():
+        first = track.get(name)
+        if first is None:
+            track[name] = now  # بدء عدّاد التأكيد
+        elif now - first >= DEATH_CONFIRM_MIN * 60:
+            confirmed.append((name, desc))
+    # إشارة زالت → صفّر عدّادها (لا تُورَّث إيجابية كاذبة من الماضي)
+    for name in list(track):
+        if name not in cands:
+            del track[name]
+    return confirmed
 
 
 def _update_one_paper_position(s, p, pid, pos, closed, partials, dry_run):
@@ -651,6 +697,29 @@ def _update_one_paper_position(s, p, pid, pos, closed, partials, dry_run):
             pnl / pos["invested"] * 100 if pos["invested"] else 0,
             reason, p["cash"]), dry_run)
         return
+    # 💀 إشارات موت العملة (صفقات DEX فقط — بيانات DexScreener مجانية):
+    # إشارتان مؤكدتان معاً = خروج كامل فوري. المستثمر يقطع الميتة رخيصة
+    # بدل انتظار وقف -60% أو انتهاء 14 يوماً. إشارة واحدة = مراقبة فقط.
+    if pos.get("kind") == "dex":
+        try:
+            pair = clients.get_pair(pos["chain"], pos["pair"])
+        except Exception:
+            pair = None
+        if pair:
+            sigs = _death_signals(pos, pair, time.time())
+            if len(sigs) >= 2:
+                desc = "، ".join(d for _, d in sigs)
+                dpnl, _dp = _paper_close(p, pid, pos, eff_price, "DEAD",
+                                         s, dry_run)
+                closed.append(pid)
+                print(f"  -> وهمي: 💀 موت {pos['name']} (${dpnl:+.2f}) "
+                      f"[{desc}]")
+                alerts.send(alerts.paper_closed_msg(
+                    pos["name"], dpnl,
+                    dpnl / pos["invested"] * 100 if pos["invested"] else 0,
+                    f"💀 إشارات موت العملة: {desc}", p["cash"]),
+                    dry_run)
+                return
 
 
 def update_paper(s, dry_run):
