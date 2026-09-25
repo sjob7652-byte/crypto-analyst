@@ -1,0 +1,1 @@
+{"cmd":"echo ops-inbox-ready; hostname; date -u +%FT%TZ","id":"init-20260925","note":"أمر اختبار أولي للقناة — آمن تماماً. Brother يستبدل هذا الملف بأوامر جديدة عند الحاجة.","timeout":60}
