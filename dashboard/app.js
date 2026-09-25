@@ -146,6 +146,7 @@ function renderCards(list) {
       </div>`;
     }).join("");
   }
+
   if (window.lucide) lucide.createIcons();
 }
 
@@ -256,6 +257,9 @@ async function render(s) {
   // آخر التنبيهات — "إنصات" الداشبورد: نفس أحداث Telegram من البيانات
   renderAlerts(s.alert_log || []);
 
+  // حالة مصادر البيانات — أي مصدر نشط الآن في كل سلسلة احتياطية
+  renderSources(s.sources || {});
+
   if (window.lucide) lucide.createIcons();
 }
 
@@ -276,6 +280,35 @@ function escHtml(s) {
   return String(s == null ? "" : s)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;")
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+const CHAIN_LABEL = {pair: "أسعار الصفقات", trending: "العملات الرائجة",
+                     macro: "نبض السوق"};
+
+function renderSources(sources) {
+  const el = $("src-grid");
+  const keys = Object.keys(sources || {});
+  if (!keys.length) {
+    el.innerHTML = `<div class="glass p-4 text-center text-slate-500 text-sm">ستظهر حالة المصادر من أول فحص بعد التحديث</div>`;
+    return;
+  }
+  el.innerHTML = keys.map(k => {
+    const srcs = sources[k] || {};
+    const names = Object.keys(srcs);
+    const active = names.find(n => srcs[n] && srcs[n].active) || names[0];
+    const dots = names.map(n => {
+      const h = srcs[n] || {};
+      const cooling = (h.cool_until || 0) > Date.now() / 1000;
+      const cls = n === active ? "bg-emerald-400" : cooling ? "bg-red-400" : "bg-slate-600";
+      const title = `${n}: ${h.uses || 0} استخدام${cooling ? " — في تبريد" : ""}`;
+      return `<span class="w-2.5 h-2.5 rounded-full ${cls}" title="${title}"></span>`;
+    }).join("");
+    return `<div class="glass p-3 flex items-center justify-between gap-2">
+      <div><div class="text-[11px] text-slate-500">${CHAIN_LABEL[k] || k}</div>
+      <div class="font-extrabold text-sm" dir="ltr">${active || "—"}</div></div>
+      <div class="flex items-center gap-1.5" dir="ltr">${dots}</div>
+    </div>`;
+  }).join("");
 }
 
 function renderAlerts(log) {
