@@ -78,6 +78,9 @@
   .btn-chart:hover { filter: brightness(1.2); }
   .stat-ic { width: 34px; height: 34px; border-radius: .8rem; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,.06); }
   .stat-ic svg { width: 18px; height: 18px; }
+  /* أشرطة موارد الخادم */
+  .bar { height: 6px; border-radius: 9999px; background: rgba(255,255,255,.08); overflow: hidden; }
+  .bar i { display: block; height: 100%; border-radius: 9999px; background: linear-gradient(90deg, #34d399, #fbbf24, #f87171); transition: width .6s ease; }
   /* صناديق قابلة للتمرير + شريط تمرير مخصص للثيم الداكن */
   .scroll-dark { scrollbar-width: thin; scrollbar-color: rgba(96,165,250,.45) rgba(255,255,255,.03); }
   .scroll-dark::-webkit-scrollbar { width: 8px; }
@@ -168,6 +171,32 @@
     <section class="mb-5">
       <h2 class="font-extrabold mb-3 flex items-center gap-2"><i data-lucide="satellite-dish" class="w-5 h-5 text-sky-400"></i> حالة المصادر <span class="text-[11px] text-slate-500 font-normal">تبديل تلقائي عند السقوط</span></h2>
       <div id="src-grid" class="grid grid-cols-1 sm:grid-cols-3 gap-3"></div>
+    </section>
+
+    <!-- موارد الخادم (وحدة resources.py — قراءة من /proc) -->
+    <section class="mb-5">
+      <h2 class="font-extrabold mb-3 flex items-center gap-2"><i data-lucide="server" class="w-5 h-5 text-amber-400"></i> موارد الخادم <span id="res-upd" class="text-[11px] text-slate-500 font-normal"></span></h2>
+      <div class="glass p-4 grid grid-cols-2 sm:grid-cols-4 gap-4" id="res-grid">
+        <div><div class="text-[11px] text-slate-500 mb-1">المعالج CPU</div><div id="r-cpu" class="font-extrabold text-sm">—</div><div class="bar mt-1"><i id="r-cpu-b" style="width:0%"></i></div></div>
+        <div><div class="text-[11px] text-slate-500 mb-1">الذاكرة RAM</div><div id="r-ram" class="font-extrabold text-sm">—</div><div class="bar mt-1"><i id="r-ram-b" style="width:0%"></i></div></div>
+        <div><div class="text-[11px] text-slate-500 mb-1">القرص</div><div id="r-disk" class="font-extrabold text-sm">—</div><div class="bar mt-1"><i id="r-disk-b" style="width:0%"></i></div></div>
+        <div><div class="text-[11px] text-slate-500 mb-1">الحمل (دقيقة)</div><div id="r-load" class="font-extrabold text-sm">—</div><div class="text-[11px] text-slate-500 mt-1" id="r-cores"></div></div>
+      </div>
+    </section>
+
+    <!-- نتائج الأبحاث الليلية (باكتست + معايرة) -->
+    <section class="mb-5">
+      <h2 class="font-extrabold mb-3 flex items-center gap-2"><i data-lucide="flask-conical" class="w-5 h-5 text-violet-400"></i> نتائج الأبحاث <span class="text-[11px] text-slate-500 font-normal">باكتست ليلي + معايرة الاحتمالات</span></h2>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div class="glass p-4">
+          <div class="text-[11px] text-slate-500 mb-2">الباكتست <span id="bt-time" class="text-slate-600"></span></div>
+          <div id="bt-body" class="text-sm space-y-1"><div class="text-slate-500">لم يُشغَّل بعد — أول تشغيل ليلي</div></div>
+        </div>
+        <div class="glass p-4">
+          <div class="text-[11px] text-slate-500 mb-2">معايرة الاحتمالات</div>
+          <div id="cal-body" class="text-sm space-y-1"><div class="text-slate-500">أحكام الخبراء فقط — النموذج يتدرب بعد 20 صفقة</div></div>
+        </div>
+      </div>
     </section>
 
     <!-- الصفقات المفتوحة -->

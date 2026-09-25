@@ -260,6 +260,10 @@ async function render(s) {
   // حالة مصادر البيانات — أي مصدر نشط الآن في كل سلسلة احتياطية
   renderSources(s.sources || {});
 
+  // موارد الخادم + نتائج الأبحاث الليلية
+  renderResources(s.resources || {});
+  renderResearch(s.research || {});
+
   if (window.lucide) lucide.createIcons();
 }
 
@@ -309,6 +313,64 @@ function renderSources(sources) {
       <div class="flex items-center gap-1.5" dir="ltr">${dots}</div>
     </div>`;
   }).join("");
+}
+
+function _fmtTs(ts) {
+  if (!ts) return "";
+  try {
+    const d = new Date(ts * 1000);
+    return d.toLocaleDateString("ar") + " " +
+           d.toLocaleTimeString("ar", {hour: "2-digit", minute: "2-digit"});
+  } catch (e) { return ""; }
+}
+
+function renderResources(r) {
+  const set = (id, val) => { const el = $(id); if (el) el.textContent = val; };
+  const bar = (id, pct) => {
+    const el = $(id);
+    if (el && pct != null) el.style.width = Math.min(100, Math.max(0, pct)) + "%";
+  };
+  if (!r || r.ts == null) return;
+  if (r.cpu_pct != null) { set("r-cpu", r.cpu_pct + "%"); bar("r-cpu-b", r.cpu_pct); }
+  if (r.ram_pct != null) {
+    set("r-ram", r.ram_pct + "%" + (r.ram_gb ? ` (${r.ram_gb}GB)` : ""));
+    bar("r-ram-b", r.ram_pct);
+  }
+  if (r.disk_pct != null) { set("r-disk", r.disk_pct + "%"); bar("r-disk-b", r.disk_pct); }
+  if (r.load1 != null) set("r-load", r.load1.toFixed(2));
+  if (r.cores) set("r-cores", r.cores + " أنوية");
+  set("res-upd", "تحديث: " + _fmtTs(r.ts));
+}
+
+function renderResearch(research) {
+  const bt = research.backtest || {};
+  const btEl = $("bt-body");
+  if (btEl) {
+    if (bt.trades != null) {
+      const wrCls = (bt.winrate_pct || 0) >= 30 ? "pos" : "neg";
+      const evCls = (bt.expectancy_usd || 0) >= 0 ? "pos" : "neg";
+      const rows = [
+        ["الصفقات", bt.trades + (bt.coins_with_trades ? ` (${bt.coins_with_trades} عملة)` : "")],
+        ["معدل الفوز", `<span class="${wrCls}">${bt.winrate_pct}%</span>`],
+        ["التوقع الرياضي", `<span class="${evCls}" dir="ltr">$${bt.expectancy_usd}</span>`],
+        ["صافي الربح", `<span class="${(bt.total_pnl_usd || 0) >= 0 ? "pos" : "neg"}" dir="ltr">$${bt.total_pnl_usd}</span>`],
+        ["أقصى تراجع", `<span dir="ltr">$${bt.max_drawdown_usd}</span>`],
+      ];
+      btEl.innerHTML = rows.map(([k, v]) =>
+        `<div class="flex justify-between"><span class="text-slate-500">${k}</span><span class="font-bold">${v}</span></div>`
+      ).join("");
+      const t = $("bt-time");
+      if (t && bt.time) t.textContent = "• " + _fmtTs(bt.time);
+    }
+  }
+  const cal = research.calibrator || {};
+  const calEl = $("cal-body");
+  if (calEl && cal.n_trades != null) {
+    const trained = cal.trained === true;
+    calEl.innerHTML = `
+      <div class="flex justify-between"><span class="text-slate-500">الصفقات المغلقة</span><span class="font-bold">${cal.n_trades}</span></div>
+      <div class="flex justify-between"><span class="text-slate-500">النموذج</span><span class="font-bold ${trained ? "pos" : ""}">${trained ? "مدرَّب — يصحح الاحتمالات" : "أحكام الخبراء فقط (يحتاج 20+)"}</span></div>`;
+  }
 }
 
 function renderAlerts(log) {
