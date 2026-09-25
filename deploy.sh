@@ -64,13 +64,16 @@ if [ -f "$HOME/bot/.env" ]; then set -a; . "$HOME/bot/.env"; set +a; fi
 exec "$HOME/bot/venv/bin/python" postmarket.py
 EOF
 chmod +x "$BOT_DIR/run_scan.sh" "$BOT_DIR/run_postmarket.sh" "$BOT_DIR/run_monitor.sh"
+chmod +x "$REPO_DIR/run_research.sh" 2>/dev/null || true
 
 echo "=== [5/6] cron ==="
 CRON_SCAN="*/2 * * * * /usr/bin/flock -n $BOT_DIR/scan.lock $BOT_DIR/run_scan.sh >> $BOT_DIR/scan.log 2>&1"
 CRON_PM="59 22 * * * /usr/bin/flock -n $BOT_DIR/scan.lock $BOT_DIR/run_postmarket.sh >> $BOT_DIR/postmarket.log 2>&1"
 CRON_MON="* * * * * /usr/bin/flock -n $BOT_DIR/monitor.lock $BOT_DIR/run_monitor.sh >> $BOT_DIR/monitor.log 2>&1"
-( crontab -l 2>/dev/null | grep -v "bot/run_scan.sh\|bot/run_postmarket.sh\|bot/run_monitor.sh"; echo "$CRON_SCAN"; echo "$CRON_PM"; echo "$CRON_MON" ) | crontab -
-crontab -l | grep "bot/run_"
+# الأبحاث الليلية (2026-09-25): ثقيلة عمداً — 02:17 بتوقيت UTC
+CRON_RESEARCH="17 2 * * * /usr/bin/flock -n $BOT_DIR/research.lock $REPO_DIR/run_research.sh >> $BOT_DIR/research.log 2>&1"
+( crontab -l 2>/dev/null | grep -v "bot/run_scan.sh\|bot/run_postmarket.sh\|bot/run_monitor.sh\|run_research.sh"; echo "$CRON_SCAN"; echo "$CRON_PM"; echo "$CRON_MON"; echo "$CRON_RESEARCH" ) | crontab -
+crontab -l | grep "bot/run_\|run_research"
 
 echo "=== [6/6] secrets check ==="
 if [ -f "$BOT_DIR/.env" ]; then

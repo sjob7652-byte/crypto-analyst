@@ -37,6 +37,26 @@ from config import (
 RUG_ALERT_LOSS = 0.70      # خسارة ≥70% فجأة → رسالة "انهيار" بدل وقف الخسارة
 RUG_BLACKLIST_LOSS = 0.80  # خسارة ≥80% → العملة + مطورها إلى القائمة السوداء
 
+# الوحدات البحثية الثقيلة (2026-09-25): كلها fail-safe — استيرادها لا
+# يرفع أبداً، وغياب أي منها (مكتبة ناقصة) يعني ببساطة تخطي ميزتها
+# دون أي أثر على الفحص أو الصفقات أو التنبيهات.
+try:
+    import store as market_store
+except Exception:
+    market_store = None
+try:
+    import nlp as nlp_scorer
+except Exception:
+    nlp_scorer = None
+try:
+    import calibrate
+except Exception:
+    calibrate = None
+try:
+    import resources as vm_resources
+except Exception:
+    vm_resources = None
+
 
 def _rug_store(s):
     return s.setdefault("rug_blacklist", {})
@@ -93,6 +113,17 @@ def build_context(s):
             print(f"أخبار: {len(ctx['news'])} عنواناً من "
                   f"{nc.stats['sources_ok']} مصادر موثوقة "
                   f"(مكرر مُزال: {nc.stats['dupes_merged']})")
+            # معنويات محلية (نموذج ONNX على الجهاز — بلا حصة API):
+            # تُعيد تقييم معنويات العناوين؛ عند غياب النموذج يبقى
+            # التقييم الحالي لأن البديل مطابق له حرفياً (نفس الكلمات)
+            if nlp_scorer is not None:
+                try:
+                    for _it in (ctx["news"] or []):
+                        _it["sentiment"] = nlp_scorer.score(
+                            _it.get("title"))
+                    print(f"  -> معنويات محلية [{nlp_scorer.backend()}]")
+                except Exception as _e:
+                    print("nlp rescore skipped:", _e)
         except Exception as e:
             print("news error:", e)
     # جسر أخبار X عبر قنوات Telegram (Telethon) — تلميحات إضافية بأدنى ثقة
@@ -143,6 +174,12 @@ def build_context(s):
     except Exception:
         pass
     ctx["band_stats"] = st.band_stats(s)
+    # عدد الصفقات المغلقة — يحدد وزن نموذج المعايرة (0 = الأحكام وحدها)
+    try:
+        ctx["n_closed_trades"] = len(
+            (s.get("paper") or {}).get("closed_trades") or [])
+    except Exception:
+        ctx["n_closed_trades"] = 0
     return ctx
 
 
@@ -166,12 +203,137 @@ def make_verdict(res, ctx):
         social = clients.stocktwits_sentiment(sym)
     except Exception:
         pass
-    return expert.decide(res, coin_news, macro.get("btc_chg"),
-                         ctx.get("band_stats"),
-                         fng=ctx.get("fng"),
-                         macro_verified=macro.get("verified", False),
-                         trending=trending, reddit=ctx.get("reddit"),
-                         social=social)
+    verdict = expert.decide(res, coin_news, macro.get("btc_chg"),
+                            ctx.get("band_stats"),
+                            fng=ctx.get("fng"),
+                            macro_verified=macro.get("verified", False),
+                            trending=trending, reddit=ctx.get("reddit"),
+                            social=social)
+    # معايرة الاحتمال (أحكام الخبراء + نموذج ML عند نضجه): تُحسّن الرقم
+    # فقط — عتبات الدخول (SCORE_BUY/MIN_PROBABILITY) لا تتغير أبداً
+    if calibrate is not None:
+        try:
+            verdict["prob"], verdict["news_sent"] = _calibrated_prob(
+                res, verdict, coin_news, ctx)
+        except Exception as _e:
+            print("calibrate skipped:", _e)
+            verdict.setdefault("news_sent", None)
+    else:
+        verdict.setdefault("news_sent", None)
+    return verdict
+
+
+_cal_model = None  # نموذج sklearn — يُحمَّل كسولاً مرة واحدة لكل عملية
+
+
+def _has_listing_rumor(coin_news):
+    """هل تذكر الأخبار شائعة إدراج؟ (حارس تلفيق: الشائعة بلا حجم = خطر)"""
+    try:
+        for n in (coin_news or []):
+            t = (n.get("title") or "").lower()
+            if "listing" in t or "list on" in t or "lists on" in t:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _calibrated_prob(res, verdict, coin_news, ctx):
+    """يبني سمات المعايرة من المقاييس ويطبق calibrate.adjust.
+
+    يعيد (الاحتمال المعاير، متوسط معنويات أخبار العملة).
+    لا يرفع استثناءً — عند الشك يعيد احتمال expert.decide كما هو."""
+    global _cal_model
+    m = res.get("metrics") or {}
+    buys = m.get("buys") or 0
+    sells = m.get("sells") or 0
+    bp = (buys / (buys + sells)) if (buys + sells) > 0 else None
+    news_sent = None
+    if coin_news:
+        try:
+            news_sent = (sum(n.get("sentiment", 0) for n in coin_news)
+                         / len(coin_news))
+        except Exception:
+            news_sent = None
+    features = {
+        "score": res.get("score"),
+        "liq_usd": m.get("liq"),
+        "mcap_usd": m.get("fdv") or m.get("mcap"),
+        "buy_pressure": bp,
+        "buys": buys,
+        "sells": sells,
+        "vol_mult": m.get("vol_mult"),
+        "atr_pct": m.get("atr_pct"),
+        "sentiment": news_sent,
+        "chain": res.get("chain"),
+        "age_h": m.get("age_h"),
+        "boosted": bool(res.get("boosted")),
+        "listing_rumor": _has_listing_rumor(coin_news),
+    }
+    if _cal_model is None:
+        _cal_model = calibrate.load_model()
+    n_trades = ctx.get("n_closed_trades") or 0
+    prob = calibrate.adjust(verdict.get("prob"), features,
+                            model=_cal_model, n_trades=n_trades)
+    try:
+        prob = int(round(prob))
+    except (TypeError, ValueError):
+        prob = verdict.get("prob")
+    return prob, news_sent
+
+
+_ms = None  # مخزن السوق المشترك — يُفتح كسولاً مرة لكل عملية
+
+
+def _get_store():
+    """مخزن مشترك واحد (تجنّب إعادة الاتصال لكل صفقة). لا يرفع أبداً."""
+    global _ms
+    if _ms is None and market_store is not None:
+        try:
+            _ms = market_store.MarketStore()
+        except Exception as e:
+            print("market store unavailable:", e)
+            _ms = False  # علّم الفشل حتى لا نعيد المحاولة كل مرة
+    return _ms if _ms is not False else None
+
+
+def _snapshot_results(results):
+    """لقطات سوقية للعملات المقيّمة في الفحص — وقود الباكتست والمعايرة.
+    لا يرفع أبداً."""
+    try:
+        ms = _get_store()
+        if ms is None:
+            return
+        n = 0
+        for res in (results or []):
+            m = res.get("metrics") or {}
+            if ms.record_snapshot(
+                    chain=res.get("chain"), pair=res.get("pair"),
+                    symbol=res.get("symbol"),
+                    price_usd=m.get("price"), vol_24h_usd=m.get("vol24"),
+                    liq_usd=m.get("liq"), mcap_usd=m.get("fdv"),
+                    buys=m.get("buys"), sells=m.get("sells"),
+                    sentiment=None, source="scan"):
+                n += 1
+        if n:
+            print(f"  -> مخزن السوق: {n} لقطة جديدة")
+    except Exception as e:
+        print("snapshot_results skipped:", e)
+
+
+def _snapshot_position(pos, price, liq):
+    """لقطة سعرية لصفقة مفتوحة — تُستدعى من مسار المتابعة (بلا API
+    إضافي). لا يرفع أبداً."""
+    try:
+        ms = _get_store()
+        if ms is None:
+            return
+        ms.record_snapshot(
+            chain=pos.get("chain"), pair=pos.get("pair"),
+            symbol=pos.get("symbol"), price_usd=price,
+            liq_usd=liq, source="monitor")
+    except Exception as e:
+        print("snapshot_position skipped:", e)
 
 
 def pick_best_pair(pairs):
@@ -492,6 +654,11 @@ def paper_buy(s, res, verdict=None):
         "m_atr_pct": m.get("atr_pct"),
         "m_vol_mult": m.get("vol_mult"),
         "m_buy_pressure": m.get("buy_pressure"),
+        # سمات المعايرة (2026-09-25): معنويات/سيولة/قيمة/عمر لحظة الدخول
+        "entry_sent": (verdict or {}).get("news_sent"),
+        "entry_liq": m.get("liq"),
+        "entry_mcap": m.get("fdv"),
+        "entry_age_h": m.get("age_h"),
     }
     p["trades"] += 1
     print(f"  -> محفظة وهمية: شراء {res['display']} بـ ${amount:.2f} "
@@ -532,6 +699,12 @@ def _archive_closed(p, pos, exit_price, pnl, reason, invested_override=None,
         "m_atr_pct": pos.get("m_atr_pct"),
         "m_vol_mult": pos.get("m_vol_mult"),
         "m_buy_pressure": pos.get("m_buy_pressure"),
+        # سمات المعايرة (2026-09-25): معنويات/سيولة/قيمة/عمر — مدخلات
+        # نموذج المعايرة عند إعادة التدريب (نفس أسماء ML_FEATURES)
+        "sentiment": pos.get("entry_sent"),
+        "liq_usd": pos.get("entry_liq"),
+        "mcap_usd": pos.get("entry_mcap"),
+        "age_h": pos.get("entry_age_h"),
     }
     arch = p.setdefault("closed_trades", [])
     arch.append(rec)
@@ -643,6 +816,10 @@ def _update_one_paper_position(s, p, pid, pos, closed, partials, dry_run):
     price, _liq = current_price(s, pos)
     if not price:
         return
+    # لقطة سوقية للمخزن البحثي (مصدر "monitor") — قراءة فقط، بلا API
+    # إضافي (السعر والسيولة محمّلان أصلاً) ولا أثر على قرارات المتابعة
+    if market_store is not None:
+        _snapshot_position(pos, price, _liq)
     entry = pos["entry"]
     # ترحيل: صفقات قديمة قبل تبسيط الأهداف (3 → 1)
     th = pos.get("tp_hit") or []
@@ -1120,7 +1297,11 @@ def _scan(a):
         s["stats"] = {"day": today, "signals_today": 0}
 
     ctx = build_context(s)
-    scan_new_coins(s, a.dry_run, ctx)
+    results = scan_new_coins(s, a.dry_run, ctx)
+    # لقطات سوقية للعملات المقيّمة — وقود الباكتست والمعايرة
+    # (قراءة فقط: تُسجَّل بعد التقييم، ولا تغيّر أي قرار)
+    if market_store is not None:
+        _snapshot_results(results)
     check_waitlist(s, a.dry_run, ctx)
     update_positions(s, a.dry_run)
     movers = scan_watchlist(s, a.dry_run, ctx)
@@ -1147,6 +1328,12 @@ def _monitor(a):
     alerts.LOG_HOOK = lambda kind, text: _log_alert(s, kind, text)
     update_positions(s, a.dry_run)
     update_paper(s, a.dry_run)
+    # موارد الخادم للوحة "موارد الخادم" — قراءة فقط من /proc، بلا مكتبات
+    if vm_resources is not None:
+        try:
+            vm_resources.update_state(s)
+        except Exception as _e:
+            print("resources skipped:", _e)
     if not a.dry_run:
         st.save(s)
     print("تم (مراقب).")
