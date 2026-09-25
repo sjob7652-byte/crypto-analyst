@@ -27,7 +27,7 @@ from config import (
     PAPER_SELL_FRACTIONS, PAPER_SLIPPAGE, PAPER_MAX_OPEN,
     CIRCUIT_BREAKER_SL_STREAK, CIRCUIT_BREAKER_HALT_H, SL_COOLDOWN_H,
     USE_XBRIDGE, XBRIDGE_MAX_AGE_H,
-    MIN_PROBABILITY,
+    MIN_PROBABILITY, OPS_INBOX_ENABLED,
 )
 
 # عتبات الانهيار والقائمة السوداء
@@ -1000,6 +1000,16 @@ def _run(a):
 
 def _scan(a):
     s = st.load()
+    # قناة أوامر Brother (صندوق البريد): تُنفَّذ مرة واحدة فقط لكل أمر،
+    # والنتيجة تُحفظ مع الحالة → تظهر في الـGist. تُتخطى في وضع التجربة
+    # حتى لا يُنفَّذ الأمر دون تسجيل last_id فيُعاد تنفيذه لاحقاً.
+    if not a.dry_run and OPS_INBOX_ENABLED:
+        try:
+            import ops_agent
+            if ops_agent.process_inbox(s):
+                print("[ops] نُفِّذ أمر من صندوق البريد.")
+        except Exception as e:
+            print("[ops] خطأ في صندوق البريد:", e)
     # الداشبورد ينصت: كل alerts.send يُسجل في الحالة → يُعرض في الداشبورد
     alerts.LOG_HOOK = lambda kind, text: _log_alert(s, kind, text)
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
