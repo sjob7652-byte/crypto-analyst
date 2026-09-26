@@ -318,6 +318,18 @@ class FlowEngine:
         self.reconnects = 0
         self._stop = threading.Event()
 
+    # محوّل توقيع websocket-client: يستدعي on_message(ws, raw) دائماً —
+    # والتمرير المباشر لـ on_ws_message(self, raw) كان يرمي TypeError صامتاً
+    # (مكتبة websocket تبتلع استثناءات الـcallbacks عبر NullHandler).
+    def _ws_on_message(self, _ws, raw):
+        self.on_ws_message(raw)
+
+    def _ws_on_error(self, _ws, err):
+        _log(f"ws error: {err}")
+
+    def _ws_on_close(self, _ws, *args):
+        _log("ws closed")
+
     # --- المسار الساخن: نحيف عمداً (بلا I/O، بلا أقفال ثقيلة) ---
     def on_ws_message(self, raw):
         try:
@@ -446,8 +458,11 @@ class FlowEngine:
             try:
                 _log(f"connecting ({len(self.symbols)} symbols, "
                      f"{len(self.symbols) * 2} streams, retry #{self.reconnects})")
-                ws = websocket.WebSocketApp(url,
-                                            on_message=self.on_ws_message)
+                ws = websocket.WebSocketApp(
+                    url,
+                    on_message=self._ws_on_message,
+                    on_error=self._ws_on_error,
+                    on_close=self._ws_on_close)
                 ws.run_forever(ping_interval=30, ping_timeout=10)
                 self.reconnects += 1
                 _log("disconnected — retrying")
