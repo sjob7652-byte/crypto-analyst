@@ -3,6 +3,7 @@
 """المشغّل الرئيسي: فحص العملات الجديدة → تحليل → تنبيه → متابعة الصفقات."""
 import argparse
 import html
+import json
 import os
 import re
 import subprocess
@@ -58,13 +59,74 @@ except Exception:
     vm_resources = None
 
 
+def _flow_candidates(res):
+    """صيغ Binance المرشحة لرمز الصفقة (BONK → BONKUSDT) — لحارس السيولة."""
+    cands, seen = [], set()
+    for raw in (res.get("symbol"), res.get("pair")):
+        if not raw:
+            continue
+        s = str(raw).upper().replace("/", "").replace("-", "").replace(" ", "")
+        for q in ("USDT", "USDC", "USD", "FDUSD", "TUSD", "BUSD"):
+            if s.endswith(q) and len(s) > len(q):
+                s = s[: -len(q)]
+                break
+        f = s + "USDT"
+        if f not in seen:
+            seen.add(f)
+            cands.append(f)
+    return cands
+
+
+def _flow_veto(res):
+    """يسأل محرك التدفق (flow.py) عبر ZeroMQ: هل هذه العملة في
+    DANGER_WHALE_DUMP (حيتان تبيع بقوة)؟
+    يرجع (vetoed: bool, info: dict|None) — fail-safe بالكامل:
+    غياب pyzmq/المحرك/البيانات = (False, None) — لا يمنع التداول أبداً."""
+    try:
+        import zmq
+    except Exception:
+        return False, None
+    cands = _flow_candidates(res)
+    if not cands:
+        return False, None
+    sock = None
+    try:
+        ctx = zmq.Context.instance()
+        sock = ctx.socket(zmq.REQ)
+        sock.setsockopt(zmq.SNDTIMEO, 200)
+        sock.setsockopt(zmq.RCVTIMEO, 200)
+        sock.setsockopt(zmq.LINGER, 0)
+        sock.connect("tcp://127.0.0.1:5559")
+        for cand in cands:
+            try:
+                sock.send_json({"sym": cand})
+                rep = sock.recv_json()
+            except Exception:
+                return False, None  # مهلة — المحرك غائب: لا فيتو
+            if not isinstance(rep, dict) or rep.get("state") == "UNKNOWN":
+                continue
+            info = {"sym": cand, "state": rep.get("state"),
+                    "cvd_5m": rep.get("cvd_5m"), "obi": rep.get("obi"),
+                    "z": rep.get("z")}
+            return (rep.get("state") == "DANGER_WHALE_DUMP"), info
+        return False, None
+    except Exception:
+        return False, None
+    finally:
+        try:
+            if sock is not None:
+                sock.close()
+        except Exception:
+            pass
+
+
 def _read_daemon_status(s):
-    """يقرأ ملفات حالة عاملي heavy-2 (البث المباشر + مختبر الأبحاث)
+    """يقرأ ملفات حالة العمال (التدفق اللحظي + مختبر الأبحاث)
     إلى state — قراءة ملفات محلية فقط، fail-safe بالكامل.
-    لا يبدأ أي عملية؛ الإشراف مهمة cron (supervise.sh)."""
+    لا يبدأ أي عملية؛ الإشراف مهمة cron/systemd."""
     try:
         home = os.environ.get("HOME") or os.path.expanduser("~")
-        for key, fname in (("stream", "stream_status.json"),
+        for key, fname in (("flow", "flow_status.json"),
                            ("research2", "research2_status.json")):
             p = os.path.join(home, "bot", fname)
             try:
@@ -648,6 +710,29 @@ def paper_buy(s, res, verdict=None):
     amount = min(PAPER_RISK_PER_TRADE, p["cash"])
     if amount < 5:
         return False
+    # ---------- حارس السيولة (flow-3): فيتو ZeroMQ لحظي ----------
+    # يسأل محرك التدفق: هل الحيتان تبيع هذه العملة الآن؟
+    # DANGER_WHALE_DUMP = تخطي الدخول بصمت (داشبورد فقط، بلا تنبيه).
+    # غياب المحرك/البيانات/المهلة = لا فيتو أبداً — لا يمنع التداول.
+    flow_vetoed, flow_info = False, None
+    try:
+        flow_vetoed, flow_info = _flow_veto(res)
+    except Exception:
+        flow_vetoed, flow_info = False, None
+    if flow_vetoed:
+        try:
+            _fv = s.setdefault("flow_vetoes", [])
+            _fv.append({"sym": (flow_info or {}).get("sym"),
+                        "name": res.get("display"),
+                        "ts": time.time(),
+                        "cvd_5m": (flow_info or {}).get("cvd_5m"),
+                        "obi": (flow_info or {}).get("obi"),
+                        "z": (flow_info or {}).get("z")})
+            del _fv[:-50]
+        except Exception:
+            pass
+        print(f"  -> حارس السيولة: فيتو حيتان على {res['display']} — لا شراء")
+        return False
     p["cash"] -= amount
     # سعر التنفيذ الواقعي: الشراء بسعر أغلى بسبب الانزلاق السعري
     eff_entry = price * (1 + PAPER_SLIPPAGE)
@@ -679,6 +764,11 @@ def paper_buy(s, res, verdict=None):
         "entry_liq": m.get("liq"),
         "entry_mcap": m.get("fdv"),
         "entry_age_h": m.get("age_h"),
+        # حارس السيولة (flow-3): بصمة التدفق لحظة الدخول — للأرشيف
+        # والتحليل (هل الصفقات المرفوضة كانت ستنهار فعلاً؟)
+        "flow_cvd": (flow_info or {}).get("cvd_5m"),
+        "flow_obi": (flow_info or {}).get("obi"),
+        "flow_state": (flow_info or {}).get("state"),
     }
     p["trades"] += 1
     print(f"  -> محفظة وهمية: شراء {res['display']} بـ ${amount:.2f} "
@@ -725,6 +815,10 @@ def _archive_closed(p, pos, exit_price, pnl, reason, invested_override=None,
         "liq_usd": pos.get("entry_liq"),
         "mcap_usd": pos.get("entry_mcap"),
         "age_h": pos.get("entry_age_h"),
+        # حارس السيولة (flow-3): بصمة التدفق لحظة الدخول
+        "flow_cvd": pos.get("flow_cvd"),
+        "flow_obi": pos.get("flow_obi"),
+        "flow_state": pos.get("flow_state"),
     }
     arch = p.setdefault("closed_trades", [])
     arch.append(rec)

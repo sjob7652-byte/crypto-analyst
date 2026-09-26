@@ -1,6 +1,8 @@
 #!/bin/bash
-# supervise.sh — يحافظ على عاملي heavy-2 حيّين: stream.py + research2.py
-# خامل وآمن: يُشغَّل كل دقيقة عبر cron، يبدأ فقط الغائب منهما.
+# supervise.sh — يحافظ على عامل مختبر الأبحاث (research2.py) حيّاً.
+# (flow.py انتقل إلى systemd: quant-engine.service — لا يُدار من cron هنا،
+#  وstream.py حُذف: flow.py هو البديل الشامل.)
+# خامل وآمن: يُشغَّل كل دقيقة عبر cron، يبدأ الغائب فقط.
 # لا يقتل شيئاً أبداً، ولا يبدأ نسخة مكررة (pgrep قبل كل بدء).
 set -u
 
@@ -28,5 +30,4 @@ start_if_missing() {
   disown 2>/dev/null || true
 }
 
-start_if_missing "stream.py" "$BOT/stream.log"
 start_if_missing "research2.py" "$BOT/research2.log"

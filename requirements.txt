@@ -12,3 +12,5 @@ onnxruntime==1.20.1    # استدلال نموذج المشاعر المحلي (
 scikit-learn==1.5.2    # معايرة الاحتمالات (LogisticRegression)
 # --- heavy-2 (2026-09-26): بث مباشر + مختبر أبحاث مستمر ---
 websocket-client==1.8.0  # عميل websocket خالص بايثون (دفق Binance العام)
+# --- flow-3 (2026-09-26): جسر IPC ZeroMQ لحارس السيولة ---
+pyzmq==27.2.0            # REQ/REP محلي 127.0.0.1:5559 (عجلات aarch64 متوفرة)
