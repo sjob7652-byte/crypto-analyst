@@ -580,7 +580,7 @@ def check_waitlist(s, dry_run, ctx):
         return
     print(f"=== إعادة فحص لائحة الانتظار ({len(wl)}) ===")
     now = time.time()
-    for wid in list(wl)[:15]:  # حد أقصى 15 إعادة فحص في الجولة
+    for wid in list(wl)[:25]:  # حد أقصى 25 إعادة فحص في الجولة (استنزاف API)
         e = wl[wid]
         if now - e["added"] > WAITLIST_MAX_AGE_H * 3600:
             wl.pop(wid, None)

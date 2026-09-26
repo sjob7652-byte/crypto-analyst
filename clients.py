@@ -3,6 +3,8 @@
 import time
 import random
 import re
+import os
+import json
 import requests
 from config import (
     DEXSCREENER_API, HONEYPOT_API, HONEYPOT_CHAIN_IDS, RUGCHECK_API,
@@ -10,6 +12,7 @@ from config import (
     BACKOFF_TRIES, BACKOFF_BASE, GECKOTERMINAL_API, GECKO_NETWORKS,
     GECKO_POOL_LIMIT, REDDIT_SUBS, REDDIT_LIMIT,
     SOURCE_FAILS_TO_COOL, SOURCE_COOLDOWN_BASE, SOURCE_COOLDOWN_MAX,
+    SECURITY_CACHE_TTL,
 )
 
 COINGECKO_API = "https://api.coingecko.com/api/v3"
@@ -266,7 +269,66 @@ def pair_chain(s, chain, pair_address):
 
 
 # ---------- فحص أمان العقد (مجاني) ----------
-def token_security(chain, address):
+# ---------- كاش دائم لفحوصات الأمان (استنزاف ذكي للـquota) ----------
+# السكانر يعمل كعملية جديدة كل دقيقة: كاش الذاكرة يموت مع العملية،
+# لذلك الكاش هنا ملف دائم (JSON بكتابة ذرية) في ~/bot.
+# القاعدة: تُخزَّن النتائج الناجحة فقط — الفشل لا يُخزَّن أبداً
+# (يبقى السلوك fail-closed كما هو: فشل الفحص = العملة مرفوضة).
+_SEC_CACHE_PATH = os.path.join(os.path.expanduser("~"), "bot",
+                               "security_cache.json")
+_SEC_CACHE_MAX = 5000
+
+
+def _sec_cache_load():
+    try:
+        with open(_SEC_CACHE_PATH, "r", encoding="utf-8") as f:
+            d = json.load(f)
+            return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _sec_cache_save(d):
+    try:
+        os.makedirs(os.path.dirname(_SEC_CACHE_PATH), exist_ok=True)
+        tmp = _SEC_CACHE_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(d, f)
+        os.replace(tmp, _SEC_CACHE_PATH)  # كتابة ذرية
+    except Exception:
+        pass
+
+
+def _sec_cached(key, section):
+    """يعيد القيمة المخزنة إذا كانت صالحة، وإلا None."""
+    try:
+        ent = _sec_cache_load().get(section, {}).get(key)
+        if isinstance(ent, dict) and ent.get("v") is not None:
+            if time.time() - float(ent.get("t", 0)) < SECURITY_CACHE_TTL:
+                return ent["v"]
+    except Exception:
+        pass
+    return None
+
+
+def _sec_store(key, section, value):
+    """يخزّن نتيجة ناجحة فقط (value=None لا تُخزَّن أبداً)."""
+    if value is None:
+        return
+    try:
+        d = _sec_cache_load()
+        sec = d.setdefault(section, {})
+        sec[key] = {"v": value, "t": time.time()}
+        if len(sec) > _SEC_CACHE_MAX:  # حد أقصى ضد تضخم الملف
+            old = sorted(sec.items(), key=lambda kv: kv[1].get("t", 0))
+            for k, _ in old[: len(sec) - _SEC_CACHE_MAX]:
+                sec.pop(k, None)
+        _sec_cache_save(d)
+    except Exception:
+        pass
+
+
+def _token_security_live(chain, address):
     """يفحص: هل البيع مستحيل؟ ما الضرائب؟ ما مستوى الخطر؟
     EVM → honeypot.is | Solana → RugCheck"""
     if chain == "solana":
@@ -290,6 +352,19 @@ def token_security(chain, address):
         "holders": _num((data.get("token") or {}).get("totalHolders")),
         "lp_locked": 0,
     }
+
+
+def token_security(chain, address):
+    """فحص أمان العقد مع كاش دائم: honeypot.is / RugCheck تُستدعى
+    للعناوين الجديدة فقط — العناوين المفحوصة خلال 6 ساعات تُقرأ من الكاش
+    (0 طلبات API). الفشل لا يُخزَّن: fail-closed محفوظ."""
+    key = f"{chain}:{(address or '').lower()}"
+    hit = _sec_cached(key, "token_security")
+    if hit is not None:
+        return hit
+    res = _token_security_live(chain, address)
+    _sec_store(key, "token_security", res)
+    return res
 
 
 def _solana_security(mint):
@@ -326,7 +401,7 @@ def rugcheck_report(mint):
     return data if isinstance(data, dict) else None
 
 
-def solana_top10_pct(mint):
+def _solana_top10_pct_live(mint):
     """تركيز أكبر 10 حاملين كنسبة من العرض (%) — عملات Solana فقط.
     يعيد None عند تعذّر الجلب (لا يُعاقب العملة على فشل الـAPI)."""
     rep = rugcheck_report(mint)
@@ -341,7 +416,18 @@ def solana_top10_pct(mint):
         return None
 
 
-def rugcheck_creator(mint):
+def solana_top10_pct(mint):
+    """نسخة مكشوفة مع كاش دائم (6 ساعات): 0 طلبات للعناوين المفحوصة."""
+    key = f"top10:{(mint or '').lower()}"
+    hit = _sec_cached(key, "top10")
+    if hit is not None:
+        return hit
+    res = _solana_top10_pct_live(mint)
+    _sec_store(key, "top10", res)
+    return res
+
+
+def _rugcheck_creator_live(mint):
     """عنوان مطور العملة (Solana) من تقرير RugCheck — مجاني وبلا مفتاح.
     يعيد None عند تعذّر الجلب أو عدم توفر المعلومة (لا يُعاقب العملة)."""
     rep = rugcheck_report(mint)
@@ -350,6 +436,17 @@ def rugcheck_creator(mint):
         return c if c else None
     except Exception:
         return None
+
+
+def rugcheck_creator(mint):
+    """نسخة مكشوفة مع كاش دائم (6 ساعات): 0 طلبات للعناوين المفحوصة."""
+    key = f"creator:{(mint or '').lower()}"
+    hit = _sec_cached(key, "creator")
+    if hit is not None:
+        return hit
+    res = _rugcheck_creator_live(mint)
+    _sec_store(key, "creator", res)
+    return res
 
 
 # ---------- Binance (بيانات عمومية) ----------
