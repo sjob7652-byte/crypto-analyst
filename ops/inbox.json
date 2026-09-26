@@ -1,6 +1,6 @@
 {
-  "id": "cron-scan-1min-20260925",
-  "cmd": "crontab -l 2>/dev/null | sed 's|^\\*/2 \\(\\*\\)|* \\1|' | crontab - && echo '--- CRON NOW ---' && crontab -l | grep 'bot/run_'",
-  "timeout": 60,
-  "note": "speed up scanner */2 -> every minute (max safe free-API cadence)"
+  "id": "apimax-verify-20260926",
+  "cmd": "echo '== HEAD =='; git -C /home/ubuntu/bot/crypto-analyst rev-parse --short HEAD; echo '== ENGINE =='; systemctl is-active quant-engine.service; python3 -c \"import json,time;d=json.load(open('/home/ubuntu/bot/flow_status.json'));print('symbols=%s msg_per_sec=%.1f rss_gb=%.2f age_s=%d'%(d.get('symbols'),d.get('msg_per_sec',0),d.get('rss_gb',0),time.time()-d.get('ts',0)))\"; echo '== PARAMS =='; grep -E '^(SCAN_LIMIT|DISCOVERY_TOKEN_CAP|GECKO_POOL_LIMIT|SECURITY_CACHE_TTL)' /home/ubuntu/bot/crypto-analyst/config.py; echo '== SCAN TAIL =='; tail -4 /home/ubuntu/bot/scan.log|cut -c1-150; echo '== SCAN ERRORS =='; grep -aiE 'traceback|error:' /home/ubuntu/bot/scan.log|tail -2|cut -c1-150; echo '== MONITOR TAIL =='; tail -2 /home/ubuntu/bot/monitor.log|cut -c1-150; echo '== CRON COUNT =='; crontab -l 2>/dev/null|grep -c 'bot/run_'; echo '== SEC CACHE =='; ls -la /home/ubuntu/bot/security_cache.json 2>/dev/null|awk '{print \"cache_bytes=\"$5}' || echo 'cache: not yet created (first run pending)'",
+  "timeout": 90,
+  "note": "full sync verification after api-max push: HEAD/engine/params/scan/monitor/cron/security-cache"
 }
