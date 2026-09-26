@@ -1,0 +1,18 @@
+[Unit]
+Description=Quant Order-Flow Engine (flow.py)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/bot/crypto-analyst
+ExecStart=/home/ubuntu/bot/venv/bin/python /home/ubuntu/bot/crypto-analyst/flow.py
+Restart=always
+RestartSec=10
+Nice=19
+StandardOutput=append:/home/ubuntu/bot/flow.log
+StandardError=append:/home/ubuntu/bot/flow.log
+
+[Install]
+WantedBy=multi-user.target
