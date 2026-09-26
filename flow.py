@@ -440,7 +440,7 @@ class FlowEngine:
         streams = "/".join(
             f"{s.lower()}@aggTrade/{s.lower()}@bookTicker"
             for s in self.symbols)
-        url = f"{WS_BASE}/stream?streams={streams}"
+        url = f"{WS_BASE}?streams={streams}"  # WS_BASE already ends with /stream
         backoff = 5
         while not self._stop.is_set():
             try:
