@@ -199,6 +199,30 @@
       </div>
     </section>
 
+    <!-- البث المباشر (عامل stream.py — دفق Binance websocket) -->
+    <section class="mb-5">
+      <h2 class="font-extrabold mb-3 flex items-center gap-2"><i data-lucide="radio-tower" class="w-5 h-5 text-emerald-400"></i> البث المباشر <span class="text-[11px] text-slate-500 font-normal">دفق Binance لحظة بلحظة</span></h2>
+      <div class="glass p-4 grid grid-cols-2 sm:grid-cols-4 gap-4" id="stream-grid">
+        <div><div class="text-[11px] text-slate-500 mb-1">العملات المراقبة</div><div id="st-syms" class="font-extrabold text-sm">—</div></div>
+        <div><div class="text-[11px] text-slate-500 mb-1">رسالة/ثانية</div><div id="st-mps" class="font-extrabold text-sm">—</div></div>
+        <div><div class="text-[11px] text-slate-500 mb-1">آخر نبضة</div><div id="st-age" class="font-extrabold text-sm">—</div></div>
+        <div><div class="text-[11px] text-slate-500 mb-1">إعادة الاتصال</div><div id="st-re" class="font-extrabold text-sm">—</div></div>
+      </div>
+      <div id="stream-note" class="text-[11px] text-slate-500 mt-2">غير نشط — يبدأ تلقائياً عبر المشرف</div>
+    </section>
+
+    <!-- مختبر الأبحاث المستمر (عامل research2.py — 24/7) -->
+    <section class="mb-5">
+      <h2 class="font-extrabold mb-3 flex items-center gap-2"><i data-lucide="cpu" class="w-5 h-5 text-rose-400"></i> مختبر الأبحاث <span class="text-[11px] text-slate-500 font-normal">مسح باكتست مستمر 24/7</span></h2>
+      <div class="glass p-4 grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div><div class="text-[11px] text-slate-500 mb-1">الوظائف المنجزة</div><div id="r2-jobs" class="font-extrabold text-sm">—</div></div>
+        <div><div class="text-[11px] text-slate-500 mb-1">أفضل بارامترات</div><div id="r2-best" class="font-extrabold text-sm">—</div></div>
+        <div><div class="text-[11px] text-slate-500 mb-1">أفضل مقياس</div><div id="r2-metric" class="font-extrabold text-sm">—</div></div>
+        <div><div class="text-[11px] text-slate-500 mb-1">آخر وظيفة</div><div id="r2-last" class="font-extrabold text-sm">—</div></div>
+      </div>
+      <div id="r2-note" class="text-[11px] text-slate-500 mt-2">غير نشط — يبدأ تلقائياً عبر المشرف</div>
+    </section>
+
     <!-- الصفقات المفتوحة -->
     <section class="mb-5">
       <h2 class="font-extrabold mb-3 flex items-center gap-2"><i data-lucide="layers" class="w-5 h-5 text-emerald-400"></i> الصفقات المفتوحة <span id="t-count" class="chip"></span></h2>

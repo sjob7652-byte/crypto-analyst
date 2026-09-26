@@ -264,6 +264,10 @@ async function render(s) {
   renderResources(s.resources || {});
   renderResearch(s.research || {});
 
+  // heavy-2: البث المباشر + مختبر الأبحاث المستمر
+  renderStream(s.stream || {});
+  renderResearch2(s.research2 || {});
+
   if (window.lucide) lucide.createIcons();
 }
 
@@ -373,8 +377,45 @@ function renderResearch(research) {
   }
 }
 
-function renderAlerts(log) {
-  const el = $("a-list");
+function renderStream(st) {
+  const set = (id, val) => { const el = $(id); if (el) el.textContent = val; };
+  const note = $("stream-note");
+  if (!st || st.ts == null) {
+    if (note) note.textContent = "غير نشط — يبدأ تلقائياً عبر المشرف";
+    return;
+  }
+  set("st-syms", (st.symbols != null ? st.symbols : "—") + " عملة");
+  set("st-mps", st.msg_per_sec != null ? st.msg_per_sec : "—");
+  if (st.last_tick_ts) {
+    const age = Math.max(0, Math.round(Date.now() / 1000 - st.last_tick_ts));
+    const el = $("st-age");
+    if (el) {
+      el.textContent = age < 60 ? "منذ " + age + " ث" : "منذ " + Math.round(age / 60) + " د";
+      el.className = "font-extrabold text-sm " + (age < 120 ? "pos" : "neg");
+    }
+  }
+  set("st-re", st.reconnects != null ? st.reconnects : "—");
+  if (note) note.textContent = "نشط • تحديث: " + _fmtTs(st.ts) +
+    (st.rows_written ? " • " + st.rows_written + " صفاً مخزناً" : "");
+}
+
+function renderResearch2(r2) {
+  const set = (id, val) => { const el = $(id); if (el) el.textContent = val; };
+  const note = $("r2-note");
+  if (!r2 || r2.jobs_done == null) {
+    if (note) note.textContent = "غير نشط — يبدأ تلقائياً عبر المشرف";
+    return;
+  }
+  set("r2-jobs", r2.jobs_done + " / " + (r2.jobs_total != null ? r2.jobs_total : "—"));
+  const bp = r2.best_params;
+  set("r2-best", bp ? ("TP1 " + bp.tp1 + " / TP2 " + bp.tp2 + " / SL " + bp.sl + " / " + bp.score) : "—");
+  set("r2-metric", r2.best_metric != null ? String(r2.best_metric) : "—");
+  set("r2-last", r2.last_job_ts ? _fmtTs(r2.last_job_ts) : "—");
+  if (note) note.textContent = "يعمل 24/7 • الدورة " + (r2.cycle != null ? r2.cycle : "—") +
+    (r2.best_coin ? " • أفضل عملة: " + r2.best_coin : "");
+}
+
+function renderAlerts(log) {  const el = $("a-list");
   if (!log.length) {
     el.innerHTML = `<div class="glass p-6 text-center text-slate-500">لا تنبيهات بعد — ستظهر هنا نفس رسائل Telegram من أول Run</div>`;
     return;
