@@ -54,6 +54,10 @@ def chain_try(s, key, candidates, need=None):
                 h2["active"] = (n2 == name)
             return data, name
         fails = int(h.get("fails") or 0) + 1
+        if _get.last_status == 429:
+            # تدوير قاسي: الحصة انتهت/حُظر المصدر → تبريد فوري من أول ضربة،
+            # والانتقال للبديل تمّ أصلاً (نحن هنا بعد فشل المرشح الحالي).
+            fails = max(fails, SOURCE_FAILS_TO_COOL)
         if fails >= SOURCE_FAILS_TO_COOL:
             cd = min(SOURCE_COOLDOWN_BASE * (2 ** (fails - SOURCE_FAILS_TO_COOL)),
                      SOURCE_COOLDOWN_MAX)
@@ -69,17 +73,26 @@ _session.headers.update({"User-Agent": BROWSER_UA,
 
 
 def _get(url, params=None):
-    """طلب GET مع حماية من الحظر المؤقت:
-    - بصمة متصفح حقيقي (User-Agent) لتفادي حظر عناوين البوتات
-    - Exponential Backoff عند 429/5xx: انتظار 3ث ثم 6ث ثم التخلي
-    - الأخطاء الدائمة (404 وغيرها) لا تُعاد — لا فائدة"""
+    """طلب GET — وضع التدوير القاسي (fail-fast):
+    - 429 (انتهاء الحصة/حظر مؤقت) = فشل فوري بلا إعادة: السلسلة تنتقل
+      للمصدر البديل في نفس اللحظة، والمصدر المحروق يدخل تبريداً ثم يعود.
+    - Exponential Backoff يُحفظ لأخطاء 5xx ومشاكل الشبكة فقط (قد تتعافى).
+    - الأخطاء الدائمة (404 وغيرها) لا تُعاد — لا فائدة.
+    - _get.last_status يحمل آخر رمز HTTP (0 = خطأ شبكة) لتقرأه السلاسل."""
+    _get.last_status = 0
     wait = BACKOFF_BASE
     for _ in range(BACKOFF_TRIES):
         try:
             r = _session.get(url, params=params, timeout=REQUEST_TIMEOUT)
+            _get.last_status = r.status_code
             if r.status_code == 200:
-                return r.json()
-            if r.status_code in (429, 500, 502, 503, 504):
+                try:
+                    return r.json()
+                except Exception:
+                    return None
+            if r.status_code == 429:
+                return None  # حصة منتهية/حظر: تدوير فوري، بلا انتظار
+            if r.status_code in (500, 502, 503, 504):
                 time.sleep(wait + random.uniform(0, 1))
                 wait *= 2
                 continue
@@ -88,6 +101,9 @@ def _get(url, params=None):
             time.sleep(wait + random.uniform(0, 1))
             wait *= 2
     return None
+
+
+_get.last_status = 0
 
 
 # ---------- Dexscreener ----------
