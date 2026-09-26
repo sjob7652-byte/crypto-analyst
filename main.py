@@ -58,6 +58,26 @@ except Exception:
     vm_resources = None
 
 
+def _read_daemon_status(s):
+    """يقرأ ملفات حالة عاملي heavy-2 (البث المباشر + مختبر الأبحاث)
+    إلى state — قراءة ملفات محلية فقط، fail-safe بالكامل.
+    لا يبدأ أي عملية؛ الإشراف مهمة cron (supervise.sh)."""
+    try:
+        home = os.environ.get("HOME") or os.path.expanduser("~")
+        for key, fname in (("stream", "stream_status.json"),
+                           ("research2", "research2_status.json")):
+            p = os.path.join(home, "bot", fname)
+            try:
+                with open(p, encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    s[key] = data
+            except Exception:
+                continue
+    except Exception as _e:
+        print("daemon status skipped:", _e)
+
+
 def _rug_store(s):
     return s.setdefault("rug_blacklist", {})
 
@@ -1334,6 +1354,11 @@ def _monitor(a):
             vm_resources.update_state(s)
         except Exception as _e:
             print("resources skipped:", _e)
+    # حالة عاملي heavy-2 (البث المباشر + مختبر الأبحاث) للداشبورد
+    try:
+        _read_daemon_status(s)
+    except Exception as _e:
+        print("daemon status skipped:", _e)
     if not a.dry_run:
         st.save(s)
     print("تم (مراقب).")
