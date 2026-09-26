@@ -199,16 +199,24 @@
       </div>
     </section>
 
-    <!-- البث المباشر (عامل stream.py — دفق Binance websocket) -->
+    <!-- حارس السيولة (محرك flow.py — فيتو الحيتان اللحظي عبر ZeroMQ) -->
     <section class="mb-5">
-      <h2 class="font-extrabold mb-3 flex items-center gap-2"><i data-lucide="radio-tower" class="w-5 h-5 text-emerald-400"></i> البث المباشر <span class="text-[11px] text-slate-500 font-normal">دفق Binance لحظة بلحظة</span></h2>
-      <div class="glass p-4 grid grid-cols-2 sm:grid-cols-4 gap-4" id="stream-grid">
-        <div><div class="text-[11px] text-slate-500 mb-1">العملات المراقبة</div><div id="st-syms" class="font-extrabold text-sm">—</div></div>
-        <div><div class="text-[11px] text-slate-500 mb-1">رسالة/ثانية</div><div id="st-mps" class="font-extrabold text-sm">—</div></div>
-        <div><div class="text-[11px] text-slate-500 mb-1">آخر نبضة</div><div id="st-age" class="font-extrabold text-sm">—</div></div>
-        <div><div class="text-[11px] text-slate-500 mb-1">إعادة الاتصال</div><div id="st-re" class="font-extrabold text-sm">—</div></div>
+      <h2 class="font-extrabold mb-3 flex items-center gap-2"><i data-lucide="shield" class="w-5 h-5 text-amber-400"></i> حارس السيولة 🛡️ <span class="text-[11px] text-slate-500 font-normal">فيتو لحظي قبل الدخول — CVD + OBI</span></h2>
+      <div class="glass p-4 grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div><div class="text-[11px] text-slate-500 mb-1">العملات المراقبة</div><div id="fl-syms" class="font-extrabold text-sm">—</div></div>
+        <div><div class="text-[11px] text-slate-500 mb-1">رسالة/ثانية</div><div id="fl-mps" class="font-extrabold text-sm">—</div></div>
+        <div><div class="text-[11px] text-slate-500 mb-1">ذاكرة المحرك</div><div id="fl-rss" class="font-extrabold text-sm">—</div></div>
+        <div><div class="text-[11px] text-slate-500 mb-1">فيتو نشط الآن</div><div id="fl-vetoes" class="font-extrabold text-sm">—</div></div>
       </div>
-      <div id="stream-note" class="text-[11px] text-slate-500 mt-2">غير نشط — يبدأ تلقائياً عبر المشرف</div>
+      <div class="mt-3">
+        <div class="text-[11px] text-slate-500 mb-1">عملات تحت فيتو الحيتان</div>
+        <div id="fl-veto-list" class="flex flex-wrap gap-1"><span class="text-slate-500 text-xs">—</span></div>
+      </div>
+      <div class="mt-3">
+        <div class="text-[11px] text-slate-500 mb-1">آخر الفيتوات</div>
+        <div id="fl-recent" class="text-xs space-y-1"><span class="text-slate-500">—</span></div>
+      </div>
+      <div id="flow-note" class="text-[11px] text-slate-500 mt-2">غير نشط — فعّل خدمة quant-engine</div>
     </section>
 
     <!-- مختبر الأبحاث المستمر (عامل research2.py — 24/7) -->

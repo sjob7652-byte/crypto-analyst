@@ -125,6 +125,10 @@ function renderCards(list) {
       const warnChip = t.warned
         ? `<div class="mb-2 text-[11px] font-bold text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg px-2 py-1" dir="rtl">🚨 خطر! السيولة تنهار أو مشكلة في العقد — راجع التنبيه</div>`
         : "";
+      // بصمة التدفق لحظة الدخول (حارس السيولة flow-3)
+      const flowChip = (t.flow_cvd != null || t.flow_obi != null)
+        ? `<div class="mb-2 text-[11px] text-slate-400" dir="ltr">🐋 flow @entry: CVD ${t.flow_cvd != null ? Number(t.flow_cvd).toFixed(0) + "$" : "—"} · OBI ${t.flow_obi != null ? Number(t.flow_obi).toFixed(2) : "—"} · ${escHtml(t.flow_state || "?")}</div>`
+        : "";
       return `<div id="trade-${slug(id)}" class="trade-card glass flash p-4">
         <div class="flex items-center gap-3 mb-3">
           <img src="${escHtml(logoFor(t))}" alt="" class="w-11 h-11 rounded-full bg-white/5"
@@ -136,6 +140,7 @@ function renderCards(list) {
         </div>
         ${partialChip}
         ${warnChip}
+        ${flowChip}
         <div class="text-3xl font-black ${cls} mb-2" dir="ltr">${pnl >= 0 ? "+" : ""}${pnl.toFixed(1)}%</div>
         <div class="text-xs text-slate-400 space-y-1 mb-3" dir="ltr">
           <div class="flex justify-between"><span>Entry</span><span class="text-slate-200">${Number(t.entry).toPrecision(4)}</span></div>
@@ -264,8 +269,8 @@ async function render(s) {
   renderResources(s.resources || {});
   renderResearch(s.research || {});
 
-  // heavy-2: البث المباشر + مختبر الأبحاث المستمر
-  renderStream(s.stream || {});
+  // flow-3: حارس السيولة + مختبر الأبحاث المستمر
+  renderFlow(s.flow || {}, s.flow_vetoes || []);
   renderResearch2(s.research2 || {});
 
   if (window.lucide) lucide.createIcons();
@@ -377,26 +382,40 @@ function renderResearch(research) {
   }
 }
 
-function renderStream(st) {
+function renderFlow(f, recentVetoes) {
   const set = (id, val) => { const el = $(id); if (el) el.textContent = val; };
-  const note = $("stream-note");
-  if (!st || st.ts == null) {
-    if (note) note.textContent = "غير نشط — يبدأ تلقائياً عبر المشرف";
+  const note = $("flow-note");
+  if (!f || f.ts == null) {
+    if (note) note.textContent = "غير نشط — فعّل خدمة quant-engine";
     return;
   }
-  set("st-syms", (st.symbols != null ? st.symbols : "—") + " عملة");
-  set("st-mps", st.msg_per_sec != null ? st.msg_per_sec : "—");
-  if (st.last_tick_ts) {
-    const age = Math.max(0, Math.round(Date.now() / 1000 - st.last_tick_ts));
-    const el = $("st-age");
-    if (el) {
-      el.textContent = age < 60 ? "منذ " + age + " ث" : "منذ " + Math.round(age / 60) + " د";
-      el.className = "font-extrabold text-sm " + (age < 120 ? "pos" : "neg");
-    }
+  set("fl-syms", (f.symbols != null ? f.symbols : "—") + " عملة");
+  set("fl-mps", f.msg_per_sec != null ? f.msg_per_sec : "—");
+  set("fl-rss", f.rss_gb != null ? Number(f.rss_gb).toFixed(1) + " GB" : "—");
+  const vetoes = Array.isArray(f.vetoes) ? f.vetoes : [];
+  const vel = $("fl-vetoes");
+  if (vel) {
+    vel.textContent = vetoes.length;
+    vel.className = "font-extrabold text-sm " + (vetoes.length ? "neg" : "pos");
   }
-  set("st-re", st.reconnects != null ? st.reconnects : "—");
-  if (note) note.textContent = "نشط • تحديث: " + _fmtTs(st.ts) +
-    (st.rows_written ? " • " + st.rows_written + " صفاً مخزناً" : "");
+  const vl = $("fl-veto-list");
+  if (vl) vl.innerHTML = vetoes.length
+    ? vetoes.slice(0, 20).map(v => `<span class="chip neg !text-xs">${escHtml(v)}</span>`).join("")
+    : `<span class="text-slate-500 text-xs">لا فيتو حالياً — التدفق طبيعي</span>`;
+  const rc = $("fl-recent");
+  if (rc) {
+    const items = (recentVetoes || []).slice(-8).reverse();
+    rc.innerHTML = items.length ? items.map(v => {
+      const when = v.ts ? _fmtTs(v.ts) : "—";
+      const cvd = v.cvd_5m != null ? Number(v.cvd_5m).toFixed(0) + "$" : "—";
+      return `<div class="flex justify-between gap-2"><span class="font-bold neg">🛡️ ${escHtml(v.name || v.sym || "?")}</span><span class="text-slate-500 font-mono" dir="ltr">CVD ${cvd} · ${when}</span></div>`;
+    }).join("") : `<span class="text-slate-500">لا فيتوات مسجلة بعد</span>`;
+  }
+  if (note) {
+    const age = Math.max(0, Math.round(Date.now() / 1000 - f.ts));
+    note.textContent = "نشط • عمر البيانات: " + age + " ث • تحديث: " + _fmtTs(f.ts);
+    note.className = "text-[11px] mt-2 " + (age <= 30 ? "pos" : "neg");
+  }
 }
 
 function renderResearch2(r2) {
