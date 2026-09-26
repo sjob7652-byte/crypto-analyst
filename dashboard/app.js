@@ -257,7 +257,7 @@ async function render(s) {
   });
 
   // سجل الصفقات المغلقة (الأرشيف التاريخي)
-  renderClosed(p.closed_trades || []);
+  renderClosed(p.closed_trades || [], p);
 
   // آخر التنبيهات — "إنصات" الداشبورد: نفس أحداث Telegram من البيانات
   renderAlerts(s.alert_log || []);
@@ -463,6 +463,7 @@ const REASON_LABEL = {
 
 let activeCFilter = "all";
 let closedArch = [];
+let closedPaper = {};
 
 // طابع زمني كامل بدقة الثانية — بصيغة منصات التداول: 2026.09.21 12:25:01
 function fmtTS(ts) {
@@ -492,13 +493,18 @@ function applyClosedFilter(f) {
   renderClosedList(list);
 }
 
-function renderClosed(arch) {
+function renderClosed(arch, p) {
   closedArch = arch || [];
+  closedPaper = p || {};
   applyClosedFilter(activeCFilter);
 }
 
 function renderClosedList(list) {
   $("c-count").textContent = list.length ? list.length + " صفقة" : "";
+    // توضيح المصالحة: الأرشيف يعرض كل السجلات الموجودة بلا حد — لا شيء مخفي.
+    // العداد العام يحسب المراكز المفتوحة منذ البداية، لا الصفقات المغلقة.
+    const nArch = closedArch.length; const nEntries = closedPaper.trades || 0; const nW = closedPaper.wins || 0, nL = closedPaper.losses || 0; const nOpen = Object.keys(closedPaper.positions || {}).length;
+    $("c-note").textContent = `تبويب «الكل» يعرض كل سجلات الأرشيف (${nArch}) — لا يوجد أي حد للعرض ولا شيء مخفي. ` + `العداد العام (${nEntries}) يحسب المراكز المفتوحة منذ البداية: ${nW + nL} أُغلقت (${nW} رابحة / ${nL} خاسرة) و${nOpen} مفتوح الآن. ` + `السجلات التفصيلية متوفرة للصفقات المغلقة منذ 2026-09-24 فقط — الأقدم منها سُجل إحصائياً بلا تفاصيل.`;
   if (!closedArch.length) {
     $("c-pnl").textContent = "—"; $("c-win").textContent = "—"; $("c-n").textContent = "0";
     $("c-list").innerHTML = `<div class="glass p-6 text-center text-slate-500">لا توجد صفقات مغلقة بعد — الأرشيف يبدأ من هذا التحديث</div>`;
