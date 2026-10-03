@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """مستمع Telegram: 📊 حلّل أصلك الآن — تحليل فوري لأي عملة عند الطلب (مثل Kdrx).
 
-يعمل كـ daemon عبر cron كل دقيقة مع flock (يُعيد التشغيل تلقائياً عند السقوط).
+يعمل عبر cron كل دقيقة مع flock: كل تشغيل يستطلع ~50 ثانية ثم يخرج طوعاً
+ليُحرر القفل — هكذا لا يمكن لتشغيلٍ عالق أن يُسكت المستمع بصمتٍ للأبد.
 يستجيب فقط لصاحب البوت (TELEGRAM_CHAT_ID) — يتجاهل أي شخص آخر بصمت.
 """
 
@@ -55,7 +56,8 @@ _last_reply = {}  # chat_id → timestamp (منع الإغراق)
 def tg(method, **params):
     # getUpdates uses long-polling (Telegram waits up to `timeout` seconds),
     # so the HTTP timeout must exceed it — otherwise every poll times out.
-    http_timeout = 70 if method == "getUpdates" else 20
+    # (نُبقي الاستطلاع قصيراً لأن التشغيل كله محدود بـ ~50 ثانية — انظر main)
+    http_timeout = 40 if method == "getUpdates" else 20
     try:
         r = requests.post(f"{API}/{method}", json=params, timeout=http_timeout)
         if r.status_code == 200:
@@ -205,9 +207,12 @@ def main():
             log.info(f"Skipped history, offset={offset}")
 
     my_chat = str(config.TELEGRAM_CHAT_ID)
-    while True:
+    # لا حلقة أبدية: كل تشغيل cron يعمل ~50 ثانية ثم يخرج ويُحرر قفل flock،
+    # فيستلم التشغيل التالي مباشرة. هذا يمنع سيناريو "علق مرة → مات للأبد".
+    deadline = time.time() + 50
+    while time.time() < deadline:
         try:
-            updates = tg("getUpdates", offset=offset, timeout=50)
+            updates = tg("getUpdates", offset=offset, timeout=25)
             if not updates:
                 continue
             for u in updates:
