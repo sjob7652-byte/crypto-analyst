@@ -131,31 +131,6 @@
     </section>
 
     <!-- حالة مصادر البيانات -->
-        <!-- Real KDRX record: literal copy from their public sealed record -->
-    <section class="mb-5" id="kdrx-real-sec" style="display:none">
-      <h2 class="font-extrabold mb-3 flex items-center gap-2"><i data-lucide="check-circle" class="w-5 h-5 text-emerald-400"></i> Real KDRX record <span class="text-[11px] text-slate-500 font-normal">literal copy from their sealed record — $100 paper wallet</span></h2>
-      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-3">
-        <div class="glass p-3"><div class="text-[11px] text-slate-500">Trades</div><div id="k-n" class="font-extrabold text-sm">—</div></div>
-        <div class="glass p-3"><div class="text-[11px] text-slate-500">Win rate</div><div id="k-wr" class="font-extrabold text-sm">—</div></div>
-        <div class="glass p-3"><div class="text-[11px] text-slate-500">Return</div><div id="k-ret" class="font-extrabold text-sm" dir="ltr">—</div></div>
-        <div class="glass p-3"><div class="text-[11px] text-slate-500">Wallet</div><div id="k-eq" class="font-extrabold text-sm" dir="ltr">—</div></div>
-        <div class="glass p-3"><div class="text-[11px] text-slate-500">Max drawdown</div><div id="k-dd" class="font-extrabold text-sm" dir="ltr">—</div></div>
-        <div class="glass p-3"><div class="text-[11px] text-slate-500">Profit factor</div><div id="k-pf" class="font-extrabold text-sm" dir="ltr">—</div></div>
-      </div>
-      <div class="glass p-4 mb-3">
-        <div class="text-[11px] text-slate-500 mb-2">Paper wallet equity curve</div>
-        <canvas id="k-curve" style="width:100%;height:140px"></canvas>
-      </div>
-      <div class="glass p-4">
-        <div class="text-[11px] text-slate-500 mb-2">Latest 30 trades from their record</div>
-        <div class="overflow-x-auto"><table class="w-full text-xs">
-          <thead><tr class="text-slate-500"><th class="p-2 text-right">Symbol</th><th class="p-2 text-right">Result</th><th class="p-2 text-right">Return</th><th class="p-2 text-right">P&amp;L</th><th class="p-2 text-right">Closed</th></tr></thead>
-          <tbody id="k-tbody"></tbody>
-        </table></div>
-      </div>
-      <div class="text-[11px] text-slate-500 mt-2 leading-relaxed" id="k-assume"></div>
-    </section>
-
     <!-- KDRX live copy: forwarded signals paper-traded live -->
     <section class="mb-5" id="kdrx-live-sec" style="display:none">
       <h2 class="font-extrabold mb-3 flex items-center gap-2"><i data-lucide="copy" class="w-5 h-5 text-violet-400"></i> نسخ KDRX الحي <span class="text-[11px] text-slate-500 font-normal">إشارات مُحوّلة من أيوب — محفظة ورقية $100 منفصلة</span></h2>
@@ -299,56 +274,6 @@ function render() {
   document.getElementById('s-wins').textContent = wins;
   document.getElementById('s-losses').textContent = (w.losses || 0);
   document.getElementById('s-sig').textContent = w.signals_sent || total;
-
-  // Real KDRX record (literal copy)
-  (function(){
-    const kr = S.kdrx_real || {};
-    const sec = document.getElementById('kdrx-real-sec');
-    if (!kr.stats || !kr.stats.n_trades) return;
-    sec.style.display = '';
-    const st = kr.stats;
-    document.getElementById('k-n').textContent = st.n_trades;
-    document.getElementById('k-wr').textContent = st.win_rate + '%';
-    const kRet = document.getElementById('k-ret');
-    kRet.textContent = (st.total_return_pct >= 0 ? '+' : '') + st.total_return_pct + '%';
-    kRet.className = 'font-extrabold text-sm ' + (st.total_return_pct >= 0 ? 'pos' : 'neg');
-    document.getElementById('k-eq').textContent = '$' + st.end_equity.toFixed(2);
-    document.getElementById('k-dd').textContent = st.max_drawdown_pct + '%';
-    document.getElementById('k-pf').textContent = st.profit_factor == null ? '—' : st.profit_factor;
-    const cv = document.getElementById('k-curve'), ctx = cv.getContext('2d');
-    const W = cv.clientWidth || 600, H = 140;
-    cv.width = W; cv.height = H;
-    const pts = kr.equity_curve || [];
-    if (pts.length > 1) {
-      const vals = pts.map(function(p){ return p.equity; });
-      const mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals), rg = (mx - mn) || 1;
-      ctx.clearRect(0, 0, W, H);
-      ctx.strokeStyle = '#334155'; ctx.lineWidth = 1; ctx.beginPath();
-      const zy = H - ((100 - mn) / rg) * (H - 16) - 8;
-      ctx.moveTo(0, zy); ctx.lineTo(W, zy); ctx.stroke();
-      ctx.strokeStyle = vals[vals.length-1] >= 100 ? '#34d399' : '#f87171';
-      ctx.lineWidth = 2; ctx.beginPath();
-      pts.forEach(function(p, i){
-        const x = (i / (pts.length - 1)) * W;
-        const y = H - ((p.equity - mn) / rg) * (H - 16) - 8;
-        if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
-      });
-      ctx.stroke();
-    }
-    const tb = document.getElementById('k-tbody');
-    tb.innerHTML = (kr.trades || []).slice(-30).reverse().map(function(t){
-      const rc = t.result === 'SL' ? 'neg' : 'pos';
-      const bp = (t.blended_pct >= 0 ? '+' : '') + t.blended_pct + '%';
-      const pl = (t.pnl >= 0 ? '+' : '') + '$' + t.pnl.toFixed(2);
-      return '<tr class="border-t border-slate-800/60"><td class="p-2 font-bold">' + t.symbol + '</td>' +
-        '<td class="p-2 ' + rc + '">' + t.result + '</td>' +
-        '<td class="p-2 ' + rc + '" dir="ltr">' + bp + '</td>' +
-        '<td class="p-2 ' + rc + '" dir="ltr">' + pl + '</td>' +
-        '<td class="p-2 text-slate-500">' + (t.closed ? t.closed.slice(0,10) : '—') + '</td></tr>';
-    }).join('');
-    document.getElementById('k-assume').textContent =
-      'Period: ' + st.period_from + ' to ' + st.period_to + ' - ' + (st.assumptions || []).join(' - ');
-  })();
 
   // KDRX live copy (forwarded signals, paper-traded live)
   (function(){
