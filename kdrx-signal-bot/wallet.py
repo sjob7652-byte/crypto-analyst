@@ -80,6 +80,7 @@ class PaperWallet:
             "direction": signal["direction"],
             "entry": entry,
             "qty": round(qty, 6),
+            "orig_qty": round(qty, 6),  # الكمية الأصلية: الإغلاقات الجزئية نِسَب منها
             "notional": round(notional, 2),
             "sl": sl,
             "sl_original": sl,
@@ -97,6 +98,9 @@ class PaperWallet:
             "signal_msg_id": None,  # message_id لرسالة الإشارة (للاقتباس reply عند TP/SL)
         }
         pos[pos_id] = position
+        if self.data.get("reserve_cash"):
+            # محفظة نسخ KDRX فقط: حجز قيمة الصفقة من النقد (يُسترد تدريجياً مع الإغلاقات)
+            self.data["cash"] = round(self.data["cash"] - notional, 4)
         self.save()
         return pos_id, position
 
@@ -110,11 +114,16 @@ class PaperWallet:
     # ---------- إغلاق جزئي / كامل ----------
 
     def partial_close(self, pos_id, pct, price, reason):
-        """إغلاق نسبة من المركز بسعر معين."""
+        """إغلاق نسبة من المركز بسعر معين (النسبة من الكمية الأصلية)."""
         pos = self.data["positions"].get(pos_id)
         if not pos or pos["status"] != "open":
             return None
-        close_qty = pos["qty"] * pct
+        # pct دائماً نسبة من الكمية الأصلية (50/30/20 مثلاً)، لا من المتبقي الحالي
+        orig_qty = pos.get("orig_qty")
+        if not orig_qty:
+            rp = pos.get("remaining_pct") or 0
+            orig_qty = pos["qty"] / rp if rp > 0 else pos["qty"]
+        close_qty = min(orig_qty * pct, pos["qty"])
         if pos["direction"] == "long":
             pnl = (price - pos["entry"]) * close_qty
         else:
@@ -123,6 +132,9 @@ class PaperWallet:
         pos["remaining_pct"] = round(pos["remaining_pct"] - pct, 4)
         pos["realized_pnl"] = round(pos["realized_pnl"] + pnl, 4)
         self.data["cash"] = round(self.data["cash"] + pnl, 4)
+        if self.data.get("reserve_cash"):
+            # محفظة نسخ KDRX فقط: استرداد أصل المبلغ المحجوز لهذا الجزء المغلق
+            self.data["cash"] = round(self.data["cash"] + close_qty * pos["entry"], 4)
         self.data["total_pnl"] = round(self.data["total_pnl"] + pnl, 4)
         event = {
             "pos_id": pos_id, "symbol": pos["symbol"],
@@ -164,7 +176,12 @@ class PaperWallet:
 
     def equity(self):
         """الرصيد الكلي = النقد + الربح المحقق (غير المحقق يُحسب عند الإغلاق)."""
-        return round(self.data["cash"], 2)
+        cash = self.data["cash"]
+        if self.data.get("reserve_cash"):
+            # محفظة نسخ KDRX: النقد المتاح + الأصل المحجوز في المراكز المفتوحة
+            reserved = sum(p["qty"] * p["entry"] for p in self.open_positions().values())
+            return round(cash + reserved, 2)
+        return round(cash, 2)
 
     def open_positions(self):
         return {k: v for k, v in self.data["positions"].items() if v["status"] == "open"}
@@ -173,8 +190,13 @@ class PaperWallet:
         d = self.data
         total = d["total_trades"]
         win_rate = round(d["wins"] / total * 100, 1) if total else 0
-        ret = round((d["cash"] - d["start"]) / d["start"] * 100, 2)
-        return {
+        reserved = 0.0
+        if d.get("reserve_cash"):
+            # محفظة نسخ KDRX: الأصل المحجوز في المراكز المفتوحة (يُحتسب في العائد)
+            reserved = round(sum(p["qty"] * p["entry"] for p in self.open_positions().values()), 2)
+        base = d["cash"] + reserved
+        ret = round((base - d["start"]) / d["start"] * 100, 2)
+        out = {
             "cash": round(d["cash"], 2),
             "start": d["start"],
             "return_pct": ret,
@@ -185,6 +207,9 @@ class PaperWallet:
             "total_pnl": round(d["total_pnl"], 2),
             "open_count": len(self.open_positions()),
         }
+        if d.get("reserve_cash"):
+            out["reserved"] = reserved
+        return out
 
     def to_dict(self):
         """الحالة الكاملة للـ dashboard."""

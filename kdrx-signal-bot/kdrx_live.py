@@ -150,6 +150,8 @@ def parse_kdrx_signal(text):
 def get_wallet():
     w = PaperWallet(path=config.KDRX_LIVE_WALLET_FILE)
     w.data.setdefault("seen_signals", {})
+    # حجز مبلغ الصفقة من النقد عند الفتح (طلب أيوب 2026-10-01) — خاص بهذه المحفظة فقط
+    w.data.setdefault("reserve_cash", True)
     return w
 
 

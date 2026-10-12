@@ -160,7 +160,8 @@
     <section class="mb-5" id="kdrx-live-sec" style="display:none">
       <h2 class="font-extrabold mb-3 flex items-center gap-2"><i data-lucide="copy" class="w-5 h-5 text-violet-400"></i> نسخ KDRX الحي <span class="text-[11px] text-slate-500 font-normal">إشارات مُحوّلة من أيوب — محفظة ورقية $100 منفصلة</span></h2>
       <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-3">
-        <div class="glass p-3"><div class="text-[11px] text-slate-500">الرصيد</div><div id="kl-eq" class="font-extrabold text-sm" dir="ltr">—</div></div>
+        <div class="glass p-3"><div class="text-[11px] text-slate-500">الرصيد المتاح</div><div id="kl-eq" class="font-extrabold text-sm" dir="ltr">—</div></div>
+        <div class="glass p-3"><div class="text-[11px] text-slate-500">محجوز في المراكز</div><div id="kl-res" class="font-extrabold text-sm" dir="ltr">—</div></div>
         <div class="glass p-3"><div class="text-[11px] text-slate-500">العائد</div><div id="kl-ret" class="font-extrabold text-sm" dir="ltr">—</div></div>
         <div class="glass p-3"><div class="text-[11px] text-slate-500">نسبة الفوز</div><div id="kl-wr" class="font-extrabold text-sm">—</div></div>
         <div class="glass p-3"><div class="text-[11px] text-slate-500">الصفقات</div><div id="kl-n" class="font-extrabold text-sm">—</div></div>
@@ -357,6 +358,7 @@ function render() {
     if (!st) return;
     sec.style.display = '';
     document.getElementById('kl-eq').textContent = '$' + st.cash.toFixed(2);
+    document.getElementById('kl-res').textContent = '$' + (st.reserved || 0).toFixed(2);
     const rEl = document.getElementById('kl-ret');
     rEl.textContent = (st.return_pct >= 0 ? '+' : '') + st.return_pct + '%';
     rEl.className = 'font-extrabold text-sm ' + (st.return_pct >= 0 ? 'pos' : 'neg');
