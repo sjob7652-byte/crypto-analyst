@@ -284,3 +284,36 @@ def market_pulse_message(prices):
 
 def publish_market_pulse(prices):
     return _send(market_pulse_message(prices))
+
+# ---------- نسخ KDRX الحي ----------
+
+def kdrx_live_open_message(parsed, position):
+    """تأكيد فتح نسخة ورقية لإشارة KDRX مُحوّلة."""
+    sym = parsed["symbol"].replace("USDT", "/USDT")
+    d = "🟢 شراء" if parsed["direction"] == "long" else "🔴 بيع"
+    risk_pct = parsed.get("risk_frac", 0.05) * 100
+    return (
+        f"📋 <b>نسخ KDRX — فُتحت الصفقة الورقية</b>\n"
+        f"\n"
+        f"{d} <b>{sym}</b>\n"
+        f"الدخول: <code>{_fmt_price(parsed['entry'])}</code>\n"
+        f"وقف الخسارة: <code>{_fmt_price(parsed['sl'])}</code>\n"
+        f"الأهداف: <code>{_fmt_price(parsed['tp1'])}</code> / "
+        f"<code>{_fmt_price(parsed['tp2'])}</code> / "
+        f"<code>{_fmt_price(parsed['tp3'])}</code>\n"
+        f"\n"
+        f"الكمية: <code>{position['qty']}</code> · القيمة: <b>${position['notional']:.2f}</b>\n"
+        f"المخاطرة: <b>{risk_pct:.2f}%</b> من المحفظة\n"
+        f"\n"
+        f"المراقبة تلقائية: بيع 50% عند الهدف الأول + الوقف للتعادل، "
+        f"30% عند الثاني، الباقي عند الثالث."
+    )
+
+
+def kdrx_live_event_message(event):
+    """حدث TP/SL لصفقة نسخ KDRX — نفس صيغة الأحداث مع بادئة النسخ."""
+    return "📋 <b>[نسخ KDRX]</b>\n" + event_message(event)
+
+
+def publish_kdrx_live_event(event, reply_to=None):
+    return _send(kdrx_live_event_message(event), reply_to=reply_to)
