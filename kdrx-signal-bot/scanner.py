@@ -82,6 +82,169 @@ def fetch_market_pulse():
     return result
 
 
+# ================= الكون الديناميكي (أعلى سيولة) =================
+
+def fetch_universe():
+    """أعلى UNIVERSE_SIZE زوج سبوت USDT سيولة من Binance — يُحفظ في universe.json.
+
+    مجاني 100%: ticker/24hr عمومي، يُحدّث كل UNIVERSE_REFRESH_HOURS.
+    يُرجع القائمة الثابتة config.WATCHLIST كاحتياطي عند الفشل.
+    """
+    import json
+    import os
+    # الكاش أولاً
+    try:
+        if os.path.exists(config.UNIVERSE_FILE):
+            with open(config.UNIVERSE_FILE, encoding="utf-8") as f:
+                cached = json.load(f)
+            age_h = (time.time() - cached.get("at", 0)) / 3600
+            if age_h < config.UNIVERSE_REFRESH_HOURS and len(cached.get("symbols", [])) >= 50:
+                return cached["symbols"]
+    except Exception:
+        pass
+    # جلب طازج
+    try:
+        r = requests.get(config.TICKER_ENDPOINT, timeout=20)
+        r.raise_for_status()
+        tickers = r.json()
+        cands = []
+        for t in tickers:
+            sym = t.get("symbol", "")
+            if not sym.endswith("USDT"):
+                continue
+            if sym in config.UNIVERSE_EXCLUDE:
+                continue
+            # استبعاد رموز الرافعة
+            if any(k in sym for k in ("UPUSDT", "DOWNUSDT", "BULLUSDT", "BEARUSDT")):
+                continue
+            try:
+                qv = float(t.get("quoteVolume", 0))
+            except Exception:
+                continue
+            if qv <= 0:
+                continue
+            cands.append((sym, qv))
+        cands.sort(key=lambda x: x[1], reverse=True)
+        symbols = [s for s, _ in cands[:config.UNIVERSE_SIZE]]
+        if len(symbols) >= 50:
+            try:
+                os.makedirs(os.path.dirname(config.UNIVERSE_FILE), exist_ok=True)
+                with open(config.UNIVERSE_FILE, "w", encoding="utf-8") as f:
+                    json.dump({"at": int(time.time()), "symbols": symbols}, f)
+            except Exception:
+                pass
+            print(f"[UNIVERSE] refreshed: {len(symbols)} pairs (top vol)", flush=True)
+            return symbols
+    except Exception as e:
+        print(f"[UNIVERSE] fetch failed: {e}", flush=True)
+    return list(config.WATCHLIST)
+
+
+def get_watchlist():
+    """قائمة العملات للفحص: الكون الديناميكي أو الثابتة كاحتياطي."""
+    try:
+        return fetch_universe()
+    except Exception:
+        return list(config.WATCHLIST)
+
+
+# ================= فلتر الحيتان / التلاعب =================
+
+def whale_filter_ok(df):
+    """فلتر التلاعب من الشموع نفسها (بدون API خارجي).
+
+    يرفض العملة إذا ظهرت علامة تلاعب واضحة على آخر شمعة مغلقة:
+    - حجم مفاجئ > WHALE_VOL_MULT × متوسط 20 شمعة (ضخ/تفريغ مشبوه)
+    - فتيل علوي متطرف > WHALE_WICK_MULT × الجسم مع مدى > WHALE_RANGE_ATR_MULT × ATR
+    يُرجع (مقبول؟، السبب).
+    """
+    try:
+        if df is None or len(df) < 30:
+            return True, ""
+        c = df.iloc[-2]  # آخر شمعة مغلقة
+        o, h, l, cl = float(c["open"]), float(c["high"]), float(c["low"]), float(c["close"])
+        vol = float(c["volume"])
+        prev_vol = df["volume"].iloc[-22:-2].astype(float)
+        avg_vol = float(prev_vol.mean()) if len(prev_vol) else 0
+        # 1) انفجار حجم مشبوه
+        if avg_vol > 0 and vol > avg_vol * config.WHALE_VOL_MULT:
+            return False, f"whale-vol-spike {vol/avg_vol:.1f}x"
+        # 2) فتيل علوي متطرف (دفع سعري وتصريف)
+        body = abs(cl - o)
+        upper_wick = h - max(o, cl)
+        candle_range = h - l
+        atr_v = float(c["atr"]) if "atr" in df.columns and pd.notna(c["atr"]) else 0
+        if body > 0 and upper_wick > body * config.WHALE_WICK_MULT:
+            if atr_v > 0 and candle_range > atr_v * config.WHALE_RANGE_ATR_MULT:
+                return False, "whale-wick-manipulation"
+        return True, ""
+    except Exception:
+        return True, ""
+
+
+# ================= خريطة RSI الحرارية (محلية، مجانية) =================
+
+def fetch_daily_rsi(symbol):
+    """RSI14 اليومي لعملة واحدة (لخريطة الحرارة)."""
+    try:
+        r = requests.get(
+            config.KLINES_ENDPOINT,
+            params={"symbol": symbol, "interval": "1d", "limit": config.HEATMAP_DAILY_LIMIT},
+            timeout=15,
+        )
+        r.raise_for_status()
+        data = r.json()
+        closes = pd.Series([float(k[4]) for k in data])
+        if len(closes) < 30:
+            return None
+        return float(rsi(closes).iloc[-1])
+    except Exception:
+        return None
+
+
+def build_heatmap(symbols):
+    """بناء خريطة RSI: {symbol: {'rsi_4h': x, 'rsi_1d': y}} — تُحفظ في heatmap.json."""
+    import json
+    import os
+    from concurrent.futures import ThreadPoolExecutor
+    heat = {}
+
+    def one(sym):
+        try:
+            return sym, fetch_daily_rsi(sym)
+        except Exception:
+            return sym, None
+
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        for sym, r1d in ex.map(one, symbols):
+            if r1d is not None:
+                heat[sym] = {"rsi_1d": round(r1d, 1)}
+    try:
+        os.makedirs(os.path.dirname(config.HEATMAP_FILE), exist_ok=True)
+        with open(config.HEATMAP_FILE, "w", encoding="utf-8") as f:
+            json.dump({"at": int(time.time()), "heat": heat}, f)
+    except Exception:
+        pass
+    print(f"[HEATMAP] built for {len(heat)} pairs", flush=True)
+    return heat
+
+
+def get_heatmap(symbols):
+    """الخريطة المخزنة (إذا حديثة) أو بناؤها."""
+    import json
+    import os
+    try:
+        if os.path.exists(config.HEATMAP_FILE):
+            with open(config.HEATMAP_FILE, encoding="utf-8") as f:
+                cached = json.load(f)
+            age_h = (time.time() - cached.get("at", 0)) / 3600
+            if age_h < config.HEATMAP_REFRESH_HOURS and cached.get("heat"):
+                return cached["heat"]
+    except Exception:
+        pass
+    return build_heatmap(symbols)
+
+
 # ================= المؤشرات (تطبيق يدوي — بدون مكتبات خارجية) =================
 
 def rsi(series, period=None):
@@ -384,8 +547,12 @@ def risk_fraction(strength):
 
 # ================= بناء الإشارة =================
 
-def build_signal(symbol, df):
-    """بناء إشارة KDRX من آخر شمعة مغلقة — بالمنهجية المستخرجة من السجل المختوم."""
+def build_signal(symbol, df, daily_rsi=None):
+    """بناء إشارة KDRX من آخر شمعة مغلقة — بالمنهجية المستخرجة من السجل المختوم.
+
+    daily_rsi: قيمة RSI اليومي من الخريطة الحرارية (تُمرَّر من scan_all لتفادي
+    جلب مكرر). إذا كانت < HEATMAP_DAILY_RSI_MIN تُرفض العملة (سكين ساقط).
+    """
     if df is None or len(df) < config.KDRX_EMA_TREND + 30:
         return None
     df = compute_indicators(df.copy())
@@ -394,6 +561,15 @@ def build_signal(symbol, df):
 
     # تحقق من صحة المؤشرات الأساسية
     if pd.isna(row["atr"]) or pd.isna(row["rsi"]) or pd.isna(row["ema200"]):
+        return None
+
+    # فلتر الحيتان/التلاعب (طلب أيوب): رفض العملات ذات الحركة المشبوهة
+    whale_ok, whale_reason = whale_filter_ok(df)
+    if not whale_ok:
+        return None
+
+    # خريطة RSI الحرارية (طلب أيوب): لا دخول إذا RSI اليومي < 30 (سكين ساقط)
+    if daily_rsi is not None and daily_rsi < config.HEATMAP_DAILY_RSI_MIN:
         return None
 
     strength, direction, details, _ = score_row(row, df)
@@ -470,16 +646,23 @@ def build_signal(symbol, df):
 
 
 def scan_all():
-    """فحص كل العملات بشكل متوازي (سريع) → قائمة الإشارات."""
+    """فحص الكون الديناميكي (أعلى سيولة) بشكل متوازي → قائمة الإشارات.
+
+    يشمل: فلتر الحيتان + خريطة RSI الحرارية + بوابات KDRX الصلبة.
+    """
     from concurrent.futures import ThreadPoolExecutor, as_completed
     signals = []
+
+    watchlist = get_watchlist()
+    heatmap = get_heatmap(watchlist)
 
     def scan_one(symbol):
         try:
             df = fetch_klines(symbol)
             if df is None:
                 return None
-            sig = build_signal(symbol, df)
+            d_rsi = (heatmap.get(symbol) or {}).get("rsi_1d")
+            sig = build_signal(symbol, df, daily_rsi=d_rsi)
             if sig:
                 print(f"[SCANNER] SIGNAL {symbol} {sig['direction']} strength={sig['strength']}", flush=True)
             return sig
@@ -489,24 +672,27 @@ def scan_all():
 
     t0 = time.time()
     with ThreadPoolExecutor(max_workers=config.SCAN_WORKERS) as ex:
-        futures = {ex.submit(scan_one, s): s for s in config.WATCHLIST}
+        futures = {ex.submit(scan_one, s): s for s in watchlist}
         for f in as_completed(futures):
             sig = f.result()
             if sig:
                 signals.append(sig)
     dt = time.time() - t0
-    print(f"[SCANNER] Scanned {len(config.WATCHLIST)} pairs in {dt:.1f}s → {len(signals)} signals", flush=True)
+    print(f"[SCANNER] Scanned {len(watchlist)} pairs in {dt:.1f}s → {len(signals)} signals", flush=True)
     return signals
 
 
 def scan_all_sequential():
     """فحص تسلسلي (احتياطي)."""
     signals = []
-    for symbol in config.WATCHLIST:
+    watchlist = get_watchlist()
+    heatmap = get_heatmap(watchlist)
+    for symbol in watchlist:
         df = fetch_klines(symbol)
         if df is None:
             continue
-        sig = build_signal(symbol, df)
+        d_rsi = (heatmap.get(symbol) or {}).get("rsi_1d")
+        sig = build_signal(symbol, df, daily_rsi=d_rsi)
         if sig:
             signals.append(sig)
             print(f"[SCANNER] SIGNAL {symbol} {sig['direction']} strength={sig['strength']}", flush=True)
@@ -583,7 +769,8 @@ def analyze_asset(symbol):
 
 
 if __name__ == "__main__":
-    print(f"[SCANNER] Scanning {len(config.WATCHLIST)} pairs on {config.TIMEFRAME}...", flush=True)
+    wl = get_watchlist()
+    print(f"[SCANNER] Scanning {len(wl)} pairs on {config.TIMEFRAME}...", flush=True)
     sigs = scan_all()
     print(f"[SCANNER] Done. {len(sigs)} signals found.", flush=True)
     for s in sigs:

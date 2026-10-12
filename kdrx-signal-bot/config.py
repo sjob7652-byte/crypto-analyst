@@ -121,3 +121,24 @@ LOG_FILE = os.path.join(STATE_DIR, "bot.log")
 KDRX_LIVE_WALLET_FILE = os.path.join(STATE_DIR, "kdrx_live.json")
 KDRX_LIVE_RISK = 0.05          # مخاطرة افتراضية 5% إذا لم تُذكر في الإشارة
 KDRX_LIVE_MAX_POSITIONS = 5
+
+# ---------- الكون الديناميكي (أعلى سيولة — طلب أيوب 2026-10-12) ----------
+UNIVERSE_SIZE = 200             # أعلى 200 زوج سبوت USDT سيولة (بدل القائمة الثابتة)
+UNIVERSE_REFRESH_HOURS = 6      # تحديث الكون كل 6 ساعات
+UNIVERSE_FILE = os.path.join(STATE_DIR, "universe.json")
+# عملات مستقرة ورموز رافعة تُستبعد دائماً من الكون
+UNIVERSE_EXCLUDE = {
+    "USDCUSDT", "FDUSDUSDT", "TUSDUSDT", "USDPUSDT", "DAIUSDT",
+    "EURUSDT", "GBPUSDT", "BRLUSDT", "ARSUSDT", "MXNUSDT",
+}
+
+# ---------- فلتر الحيتان / التلاعب (طلب أيوب 2026-10-12) ----------
+WHALE_VOL_MULT = 4.0            # رفض إذا حجم آخر شمعة مغلقة > 4× متوسط 20 شمعة (ضخ مشبوه)
+WHALE_WICK_MULT = 2.0           # رفض إذا الفتيل العلوي > 2× جسم الشمعة (تلاعب/تصريف)
+WHALE_RANGE_ATR_MULT = 2.5      # ويكون مدى الشمعة > 2.5× ATR (حركة غير طبيعية)
+
+# ---------- خريطة RSI الحرارية المحلية (طلب أيوب 2026-10-12) ----------
+HEATMAP_DAILY_RSI_MIN = 30      # رفض إذا RSI اليومي < 30 (سكين ساقط على الفريم الكبير)
+HEATMAP_REFRESH_HOURS = 1       # تحديث الخريطة كل ساعة
+HEATMAP_FILE = os.path.join(STATE_DIR, "heatmap.json")
+HEATMAP_DAILY_LIMIT = 60        # شموع يومية لحساب RSI14

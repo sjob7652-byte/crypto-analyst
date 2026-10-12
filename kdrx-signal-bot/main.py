@@ -164,12 +164,20 @@ def publish_gist(wallet):
             kdrx_live_state = kdrx_live.gist_state()
         except Exception:
             pass
+        heatmap_state = {}
+        try:
+            with open(os.path.join(os.path.dirname(__file__), "state", "heatmap.json")) as f:
+                heatmap_state = json.load(f)
+        except Exception:
+            pass
         gist_state = {
             "wallet": wallet.to_dict(),
             "system": sysstats.get_stats(),
             "sources": sources.get_status(),
             "kdrx_real": kdrx_real,
             "kdrx_live": kdrx_live_state,
+            "heatmap": heatmap_state.get("heat", {}),
+            "universe_at": heatmap_state.get("at", 0),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         gist_pub.publish(gist_state)
