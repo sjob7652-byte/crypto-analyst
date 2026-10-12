@@ -54,10 +54,14 @@ def signal_message(sig, position=None):
     risk_emoji = sig.get("risk_emoji", "🟡")
     risk_lbl = sig.get("risk_level", "متوسطة")
 
-    entry_line = f"الدخول: <code>{_fmt_price(sig['entry'])}</code>"
+    # منطقة الدخول (مثل Kdrx: الدخول 68.06، منطقة 67.066–69.054)
     zone = sig.get("entry_zone")
+    entry_line = f"الدخول: <code>{_fmt_price(sig['entry'])}</code>"
     if zone:
         entry_line += f" (منطقة {_fmt_price(zone[0])} – {_fmt_price(zone[1])})"
+
+    # الوقف مع مسافته % (مثل Kdrx: 59.609 (−12.42%))
+    sl_dist_pct = abs(sig["entry"] - sig["sl"]) / sig["entry"] * 100 if sig["entry"] else 0
 
     lines = [
         f"{emoji} <b>صفقة {direction_ar} جديدة — {pair}</b>",
@@ -68,7 +72,7 @@ def signal_message(sig, position=None):
         f"🛡️ حجم المخاطرة <b>{sig['risk_pct']}%</b>",
         "",
         entry_line,
-        f"وقف الخسارة: <code>{_fmt_price(sig['sl'])}</code> (−{abs(sig['entry']-sig['sl'])/sig['entry']*100:.2f}%)",
+        f"وقف الخسارة: <code>{_fmt_price(sig['sl'])}</code> (−{sl_dist_pct:.2f}%)",
         f"الهدف 1: <code>{_fmt_price(sig['tp1'])}</code>",
         f"الهدف 2: <code>{_fmt_price(sig['tp2'])}</code>",
         f"الهدف 3: <code>{_fmt_price(sig['tp3'])}</code>",
@@ -124,6 +128,8 @@ def event_message(event):
         )
 
     emoji = "✅" if pnl >= 0 else "🛑"
+
+    # صيغة Kdrx للهدف الثاني/الثالث: 🎯 XRPUSDT بلغ الهدف 2 — الدخول: 1.483، الهدف: 1.554، النتيجة: +4.79%.
     if event["reason"] in ("TP2", "TP3"):
         n = "2" if event["reason"] == "TP2" else "3"
         entry = event.get("entry", 0)
@@ -178,7 +184,12 @@ def publish_event(event, reply_to=None):
     return _send(event_message(event), reply_to=reply_to)
 
 
+def publish_summary(stats):
+    return _send(summary_message(stats))
+
+
 def analysis_message(a):
+    """رسالة التحليل الفوري (مثل زر Kdrx: 📊 حلّل أصلك الآن)."""
     pair = a["symbol"].replace("USDT", "/USDT")
     if a["direction"] == "long":
         trend_ar, trend_emoji = "صاعد", "📈"
@@ -190,8 +201,8 @@ def analysis_message(a):
         f"📊 <b>تحليل {pair}</b>",
         f"سبوت · فريم 4 ساعات · {a['risk_emoji']} مخاطرة {a['risk_level']}",
         "",
-        f"💪 قوة الشراء <b>{a['long_score']}</b>/100 · قوة البيع <b>{a['short_score']}</b>/100",
-        f"{trend_emoji} الاتجاه: <b>{trend_ar}</b> (ADX {a['adx']})",
+        f"💪 قوة الإشارة <b>{a['strength']}</b>/100",
+        f"{trend_emoji} الاتجاه: <b>{trend_ar}</b> (RSI {a['rsi']})",
         "",
         a["analysis"],
         "",
@@ -210,14 +221,14 @@ def publish_analysis(a, reply_to=None):
     return _send(analysis_message(a), reply_to=reply_to)
 
 
-def publish_summary(stats):
-    return _send(summary_message(stats))
-
-
 def weekly_rollup_message(trades):
+    """حصيلة الأسبوع مثل Kdrx: المغلقة · بلغت الهدف · الوقف · نسبة الإصابة · أفضل/أسوأ."""
     total = len(trades)
     if not total:
-        return "📊 <b>حصيلة الأسبوع</b>\n\nلا صفقات مغلقة هذا الأسبوع."
+        return (
+            "📊 <b>حصيلة الأسبوع</b>\n\n"
+            "لا صفقات مغلقة هذا الأسبوع."
+        )
     wins = [t for t in trades if t.get("pnl", 0) > 0]
     losses = [t for t in trades if t.get("pnl", 0) <= 0]
     hit_rate = round(len(wins) / total * 100, 1)
@@ -225,13 +236,15 @@ def weekly_rollup_message(trades):
     worst = min(trades, key=lambda t: t.get("pnl_pct", 0))
     total_pnl = sum(t.get("pnl", 0) for t in trades)
     lines = [
-        "📊 <b>حصيلة الأسبوع</b>", "",
+        "📊 <b>حصيلة الأسبوع</b>",
+        "",
         f"الصفقات المغلقة: <b>{total}</b>",
         f"بلغت الهدف: <b>{len(wins)}</b> · أُغلقت على الوقف: <b>{len(losses)}</b>",
         f"نسبة الإصابة: <b>{hit_rate}%</b>",
         f"أفضل صفقة: <b>{best['symbol'].replace('USDT', '/USDT')}</b> {best.get('pnl_pct', 0):+.2f}%",
         f"أسوأ صفقة: <b>{worst['symbol'].replace('USDT', '/USDT')}</b> {worst.get('pnl_pct', 0):+.2f}%",
-        f"صافي الربح: <b>${total_pnl:+.2f}</b>", "",
+        f"صافي الربح: <b>${total_pnl:+.2f}</b>",
+        "",
         "ننشر الربح والخسارة معاً — وكل تحليل يُتابع آلياً من لحظة صدوره.",
     ]
     return "\n".join(lines)
@@ -271,37 +284,3 @@ def market_pulse_message(prices):
 
 def publish_market_pulse(prices):
     return _send(market_pulse_message(prices))
-
-
-# ---------- نسخ KDRX الحي ----------
-
-def kdrx_live_open_message(parsed, position):
-    """تأكيد فتح نسخة ورقية لإشارة KDRX مُحوّلة."""
-    sym = parsed["symbol"].replace("USDT", "/USDT")
-    d = "🟢 شراء" if parsed["direction"] == "long" else "🔴 بيع"
-    risk_pct = parsed.get("risk_frac", 0.05) * 100
-    return (
-        f"📋 <b>نسخ KDRX — فُتحت الصفقة الورقية</b>\n"
-        f"\n"
-        f"{d} <b>{sym}</b>\n"
-        f"الدخول: <code>{_fmt_price(parsed['entry'])}</code>\n"
-        f"وقف الخسارة: <code>{_fmt_price(parsed['sl'])}</code>\n"
-        f"الأهداف: <code>{_fmt_price(parsed['tp1'])}</code> / "
-        f"<code>{_fmt_price(parsed['tp2'])}</code> / "
-        f"<code>{_fmt_price(parsed['tp3'])}</code>\n"
-        f"\n"
-        f"الكمية: <code>{position['qty']}</code> · القيمة: <b>${position['notional']:.2f}</b>\n"
-        f"المخاطرة: <b>{risk_pct:.2f}%</b> من المحفظة\n"
-        f"\n"
-        f"المراقبة تلقائية: بيع 50% عند الهدف الأول + الوقف للتعادل، "
-        f"30% عند الثاني، الباقي عند الثالث."
-    )
-
-
-def kdrx_live_event_message(event):
-    """حدث TP/SL لصفقة نسخ KDRX — نفس صيغة الأحداث مع بادئة النسخ."""
-    return "📋 <b>[نسخ KDRX]</b>\n" + event_message(event)
-
-
-def publish_kdrx_live_event(event, reply_to=None):
-    return _send(kdrx_live_event_message(event), reply_to=reply_to)

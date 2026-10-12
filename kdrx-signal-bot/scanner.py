@@ -162,6 +162,7 @@ def compute_indicators(df):
     df["ema9"] = c.ewm(span=9, min_periods=9).mean()
     df["ema21"] = c.ewm(span=21, min_periods=21).mean()
     df["ema50"] = c.ewm(span=50, min_periods=50).mean()
+    df["ema200"] = c.ewm(span=config.KDRX_EMA_TREND, min_periods=config.KDRX_EMA_TREND).mean()
     bb_u, bb_m, bb_l = bollinger(c)
     df["bb_u"], df["bb_m"], df["bb_l"] = bb_u, bb_m, bb_l
     df["bb_pct"] = (c - bb_l) / (bb_u - bb_l).replace(0, np.nan)
@@ -224,14 +225,16 @@ def risk_level(strength):
         return "مرتفعة", "🔴"
 
 
-def build_analysis_text(direction, rsi_val, support, resistance, vol_ratio, entry):
-    """نص التحليل مثل Kdrx: الاتجاه + مؤشر القوة + الدعم + الحجم."""
+def build_analysis_text(direction, rsi_val, support, resistance, vol_ratio, entry, dip_pct=None):
+    """نص التحليل مثل Kdrx: الاتجاه + مؤشر القوة + الدعم + التراجع (+ الحجم معلومة)."""
     trend = "صاعد" if direction == "long" else "هابط"
     parts = [f"الاتجاه {trend} ومؤشر القوة {rsi_val:.0f}"]
     if direction == "long" and support:
         parts.append(f"والسعر قريب من دعم عند {_fmt(support)}")
     elif direction == "short" and resistance:
         parts.append(f"والسعر قريب من مقاومة عند {_fmt(resistance)}")
+    if dip_pct is not None and dip_pct > 0:
+        parts.append(f"بعد تراجع {dip_pct * 100:.1f}% من القمة")
     parts.append(f"حجم التداول ×{vol_ratio:.2f} المعدل.")
     return "📌 " + "، ".join(parts)
 
@@ -244,108 +247,121 @@ def _fmt(x):
     return f"{x:.6f}"
 
 
-# ================= التقييم (0-100) =================
+# ================= التقييم (0-100) — منهجية KDRX التجريبية =================
+# مستخرج من 1398 صفقة KDRX مختومة (2026-10-12):
+#  ترند EMA200 (30) + منطقة RSI ‏(25‏) + شراء التراجع (20) + قرب الدعم (15) + زخم ADX ‏(10‏)
+#  شراء فقط (long-only). لا فلتر حجم، لا بوابة ADX صلبة.
 
-def _raw_scores(row, prev):
-    """تقييم شمعة واحدة → (نقاط الشراء 0-100، نقاط البيع 0-100، التفاصيل)."""
-    long_pts, short_pts, details = 0.0, 0.0, {}
-
-    # RSI (وزن 15)
-    r = row["rsi"]
-    if pd.notna(r):
-        if r < 30:
-            long_pts += 15; details["rsi"] = "oversold→long"
-        elif r < 45:
-            long_pts += 7; details["rsi"] = "weak→long"
-        elif r > 70:
-            short_pts += 15; details["rsi"] = "overbought→short"
-        elif r > 55:
-            short_pts += 7; details["rsi"] = "strong→short"
-
-    # MACD histogram (وزن 15)
-    mh, mh_prev = row["macd_hist"], prev["macd_hist"]
-    if pd.notna(mh) and pd.notna(mh_prev):
-        if mh > 0 and mh_prev <= 0:
-            long_pts += 15; details["macd"] = "bullish cross"
-        elif mh > 0:
-            long_pts += 7; details["macd"] = "bullish"
-        elif mh < 0 and mh_prev >= 0:
-            short_pts += 15; details["macd"] = "bearish cross"
-        elif mh < 0:
-            short_pts += 7; details["macd"] = "bearish"
-
-    # EMA alignment (وزن 15)
-    e9, e21, e50 = row["ema9"], row["ema21"], row["ema50"]
-    if pd.notna(e9) and pd.notna(e21) and pd.notna(e50):
-        if e9 > e21 > e50:
-            long_pts += 15; details["ema"] = "bull aligned"
-        elif e9 > e21:
-            long_pts += 7; details["ema"] = "bull partial"
-        elif e9 < e21 < e50:
-            short_pts += 15; details["ema"] = "bear aligned"
-        elif e9 < e21:
-            short_pts += 7; details["ema"] = "bear partial"
-
-    # Bollinger %B (وزن 10)
-    bbp = row["bb_pct"]
-    if pd.notna(bbp):
-        if bbp < 0.1:
-            long_pts += 10; details["bb"] = "lower band→long"
-        elif bbp < 0.3:
-            long_pts += 5
-        elif bbp > 0.9:
-            short_pts += 10; details["bb"] = "upper band→short"
-        elif bbp > 0.7:
-            short_pts += 5
-
-    # Stochastic RSI (وزن 10)
-    sr = row["stoch_rsi"]
-    if pd.notna(sr):
-        if sr < 20:
-            long_pts += 10; details["stoch"] = "oversold→long"
-        elif sr > 80:
-            short_pts += 10; details["stoch"] = "overbought→short"
-
-    # ADX trend strength (وزن 15 — مكافأة للاتجاه القوي)
-    a = row["adx"]
-    pdi, mdi = row["plus_di"], row["minus_di"]
-    if pd.notna(a) and pd.notna(pdi) and pd.notna(mdi):
-        if a > 25:
-            if pdi > mdi:
-                long_pts += 15; details["adx"] = f"strong uptrend ({a:.0f})"
-            else:
-                short_pts += 15; details["adx"] = f"strong downtrend ({a:.0f})"
-        elif a > 20:
-            if pdi > mdi:
-                long_pts += 8; details["adx"] = f"trend up ({a:.0f})"
-            else:
-                short_pts += 8; details["adx"] = f"trend down ({a:.0f})"
-
-    # Volume confirmation (وزن 10)
-    vr = row["vol_ratio"]
-    if pd.notna(vr) and vr > 1.5:
-        if long_pts > short_pts:
-            long_pts += 10; details["vol"] = f"high vol ({vr:.1f}x)"
-        elif short_pts > long_pts:
-            short_pts += 10; details["vol"] = f"high vol ({vr:.1f}x)"
-
-    total = long_pts + short_pts
-    if total == 0:
-        return 50.0, 50.0, details
-
-    long_score = round(long_pts)  # من 100 (مجموع الأوزان = 100)
-    short_score = round(short_pts)
-    return long_score, short_score, details
+def _dip_stats(row, df):
+    """إحصائيات التراجع: (dip_pct من قمة 20 شمعة، المسافة لقاع 20 شمعة بوحدة ATR)."""
+    try:
+        n = config.KDRX_DIP_LOOKBACK
+        hist = df.iloc[-2 - n:-2]  # آخر 20 شمعة مغلقة قبل شمعة الإشارة (بلا lookahead)
+        if len(hist) < n:
+            return None, None
+        close = float(row["close"])
+        atr_v = float(row["atr"])
+        high20 = float(hist["high"].max())
+        low20 = float(hist["low"].min())
+        dip_pct = (high20 - close) / close if close > 0 else 0.0
+        dist_low_atr = (close - low20) / atr_v if atr_v > 0 else 99.0
+        return dip_pct, dist_low_atr
+    except Exception:
+        return None, None
 
 
-def score_row(row, prev):
-    long_score, short_score, details = _raw_scores(row, prev)
-    direction = "long" if long_score > short_score else "short" if short_score > long_score else "neutral"
-    strength = max(long_score, short_score)
-    return strength, direction, details, direction
+def _kdrx_score(row, df):
+    """تقييم KDRX ‏(0-100‏) لصفقة شراء. يُرجع (النقاط، التفاصيل)."""
+    score, details = 0.0, {}
+    close = float(row["close"])
+
+    # 1) الترند: فوق EMA200 (91.7% من صفقات KDRX) — 30 نقطة
+    ema200 = row.get("ema200")
+    ema50 = row.get("ema50")
+    if ema200 is not None and pd.notna(ema200) and close > float(ema200):
+        score += 20
+        details["trend200"] = "above EMA200"
+    if ema50 is not None and pd.notna(ema50) and close > float(ema50):
+        score += 10
+        details["trend50"] = "above EMA50"
+
+    # 2) RSI في المنطقة المحايدة 45-60 (65% من الصفقات) — 25 نقطة
+    r = row.get("rsi")
+    if r is not None and pd.notna(r):
+        r = float(r)
+        if config.KDRX_RSI_LO <= r <= config.KDRX_RSI_HI:
+            score += 25
+            details["rsi"] = f"neutral {r:.0f}"
+        elif config.KDRX_RSI_HARD_LO <= r <= config.KDRX_RSI_HARD_HI:
+            score += 12
+            details["rsi"] = f"edge {r:.0f}"
+
+    # 3) شراء التراجع: نزول 3-8% من قمة 20 شمعة (الوسيط 4.5%) — 20 نقطة
+    dip_pct, dist_low_atr = _dip_stats(row, df)
+    if dip_pct is not None:
+        if 0.03 <= dip_pct <= 0.08:
+            score += 20
+            details["dip"] = f"-{dip_pct * 100:.1f}%"
+        elif 0.02 <= dip_pct < 0.03 or 0.08 < dip_pct <= 0.13:
+            score += 10
+            details["dip"] = f"-{dip_pct * 100:.1f}%"
+
+    # 4) قرب الدعم: الوقف ≈ 0.1 ATR تحت قاع 20 شمعة — 15 نقطة
+    if dist_low_atr is not None:
+        if dist_low_atr <= 1.0:
+            score += 15
+            details["support"] = f"{dist_low_atr:.1f} ATR"
+        elif dist_low_atr <= 2.0:
+            score += 8
+            details["support"] = f"{dist_low_atr:.1f} ATR"
+
+    # 5) زخم ADX (خفيف — لا بوابة صلبة: 37% من الصفقات بـ ADX<20) — 10 نقاط
+    a = row.get("adx")
+    pdi, mdi = row.get("plus_di"), row.get("minus_di")
+    if a is not None and pd.notna(a) and pdi is not None and mdi is not None:
+        a = float(a)
+        if a > 25 and float(pdi) > float(mdi):
+            score += 10
+            details["adx"] = f"momentum {a:.0f}"
+        elif a >= 20:
+            score += 5
+
+    return round(score), details
+
+
+def _kdrx_hard_gates(row, df):
+    """البوابات الصلبة للدخول (منهجية KDRX). تُرجع (مقبول؟، [الأسباب])."""
+    reasons = []
+    close = float(row["close"])
+
+    ema200 = row.get("ema200")
+    if ema200 is None or pd.isna(ema200) or close <= float(ema200):
+        reasons.append("under EMA200")
+
+    r = row.get("rsi")
+    if r is None or pd.isna(r) or not (config.KDRX_RSI_HARD_LO <= float(r) <= config.KDRX_RSI_HARD_HI):
+        reasons.append("RSI out of range")
+
+    dip_pct, _ = _dip_stats(row, df)
+    if dip_pct is None or dip_pct < config.KDRX_MIN_DIP_PCT:
+        reasons.append("no dip")
+
+    return (len(reasons) == 0), reasons
+
+
+def score_row(row, df):
+    """تقييم شمعة واحدة بمنهجية KDRX ‏(شراء فقط‏) → (القوة، الاتجاه، التفاصيل، الاتجاه)."""
+    score, details = _kdrx_score(row, df)
+    ok, _ = _kdrx_hard_gates(row, df)
+    direction = "long" if (ok and score >= config.MIN_SCORE) else "neutral"
+    return score, direction, details, direction
 
 
 def buyer_dominance(df, lookback=None):
+    """سيطرة المشترين من أحجام taker (تقريب نظام الحيتان عند Kdrx).
+
+    Kdrx يمنع الدخول إذا سيطرة البائعين > 51.6% (مرصود من قناة المشغّل).
+    """
     lookback = lookback or config.DOMINANCE_LOOKBACK
     try:
         recent = df.tail(lookback)
@@ -359,6 +375,7 @@ def buyer_dominance(df, lookback=None):
 
 
 def risk_fraction(strength):
+    """حجم المخاطرة يتدرج مع قوة الإشارة: 3.09% → 6.67% (مرصود من إشارات Kdrx)."""
     span = 100 - config.MIN_SCORE
     f = (strength - config.MIN_SCORE) / span if span > 0 else 0
     f = max(0.0, min(1.0, f))
@@ -368,46 +385,38 @@ def risk_fraction(strength):
 # ================= بناء الإشارة =================
 
 def build_signal(symbol, df):
-    """بناء إشارة كاملة من آخر شمعة مغلقة (نستبعد الشمعة الجارية)."""
-    if df is None or len(df) < 60:
+    """بناء إشارة KDRX من آخر شمعة مغلقة — بالمنهجية المستخرجة من السجل المختوم."""
+    if df is None or len(df) < config.KDRX_EMA_TREND + 30:
         return None
     df = compute_indicators(df.copy())
     # آخر شمعة مغلقة = قبل الأخيرة (الأخيرة قد تكون جارية)
     row = df.iloc[-2]
-    prev = df.iloc[-3]
 
     # تحقق من صحة المؤشرات الأساسية
-    if pd.isna(row["adx"]) or pd.isna(row["atr"]) or pd.isna(row["rsi"]):
+    if pd.isna(row["atr"]) or pd.isna(row["rsi"]) or pd.isna(row["ema200"]):
         return None
 
-    strength, direction, details, _ = score_row(row, prev)
+    strength, direction, details, _ = score_row(row, df)
 
-    # Kdrx: شراء فقط (long-only spot)
+    # Kdrx: شراء فقط (long-only spot) + البوابات الصلبة التجريبية
     if direction != "long":
         return None
-
-    # البوابة: نقاط ≥ 55 و ADX > 20
     if strength < config.MIN_SCORE:
         return None
-    if row["adx"] < config.MIN_ADX:
-        return None
 
-    # بوابة السيطرة (نظام الحيتان): لا دخول إذا البائعون مسيطرون
+    # بوابة السيطرة (نظام الحيتان — مرصود من أدوات Kdrx): لا دخول إذا البائعون مسيطرون
     dominance = buyer_dominance(df)
     if dominance < config.MIN_BUYER_DOMINANCE:
         return None
 
     entry = float(row["close"])
-
-    # فلتر Kdrx: الدخول قرب الدعم
-    support, resistance = find_support_resistance(df)
-    if not is_near_support(entry, support):
-        return None  # السعر بعيد عن الدعم — ليست صفقة Kdrx
-
     atr_val = float(row["atr"])
-    sl_dist = atr_val * config.ATR_SL_MULT
 
+    # الوقف: 2× ATR تحت الدخول (≈ تحت قاع 20 شمعة)، بحد أدنى 2.5% — تجريبي
+    sl_dist = max(atr_val * config.ATR_SL_MULT, entry * config.SL_MIN_PCT)
     sl = entry - sl_dist
+
+    # سلم KDRX الثابت: 1R / 2R / 3R
     tp1 = entry + sl_dist * config.TP_MULTIPLES[0]
     tp2 = entry + sl_dist * config.TP_MULTIPLES[1]
     tp3 = entry + sl_dist * config.TP_MULTIPLES[2]
@@ -416,7 +425,7 @@ def build_signal(symbol, df):
     zp = config.ENTRY_ZONE_PCT
     entry_lo, entry_hi = entry * (1 - zp), entry * (1 + zp)
 
-    rr = round(sl_dist * config.TP_MULTIPLES[0] / sl_dist, 2)
+    rr = round(config.TP_MULTIPLES[0], 2)  # سلم 1R/2R/3R
     rfrac = risk_fraction(strength)
     risk_pct = round(rfrac * 100, 2)
 
@@ -424,11 +433,13 @@ def build_signal(symbol, df):
     risk_lbl, risk_emoji = risk_level(strength)
     rsi_val = float(row["rsi"]) if pd.notna(row["rsi"]) else 50
     vol_r = float(row["vol_ratio"]) if pd.notna(row["vol_ratio"]) else 1.0
-    analysis = build_analysis_text("long", rsi_val, support, resistance, vol_r, entry)
+    dip_pct, _ = _dip_stats(row, df)
+    support = float(df.iloc[-2 - config.KDRX_DIP_LOOKBACK:-2]["low"].min())
+    analysis = build_analysis_text("long", rsi_val, support, None, vol_r, entry, dip_pct)
 
     return {
         "symbol": symbol,
-        "direction": "long",  # long = شراء
+        "direction": "long",  # شراء فقط
         "timeframe": config.TIMEFRAME,
         "type": "spot",
         "strength": strength,
@@ -452,7 +463,7 @@ def build_signal(symbol, df):
         "risk_emoji": risk_emoji,
         "rsi_value": round(rsi_val, 0),
         "support": round(support, 6) if support else None,
-        "resistance": round(resistance, 6) if resistance else None,
+        "resistance": None,
         "vol_ratio": round(vol_r, 2),
         "analysis": analysis,
     }
@@ -504,59 +515,70 @@ def scan_all_sequential():
 
 
 def analyze_asset(symbol):
+    """تحليل فوري لأي عملة (مثل زر Kdrx: 📊 حلّل أصلك الآن).
+
+    بمنهجية KDRX التجريبية (شراء فقط) — يُرجع الصورة الكاملة + حكم (منطقة شراء/انتظر/تجنّب).
+    """
     df = fetch_klines(symbol)
-    if df is None or len(df) < 60:
+    if df is None or len(df) < config.KDRX_EMA_TREND + 30:
         return None
     df = compute_indicators(df.copy())
-    row = df.iloc[-2]
-    prev = df.iloc[-3]
-    if pd.isna(row["adx"]) or pd.isna(row["atr"]) or pd.isna(row["rsi"]):
+    row = df.iloc[-2]  # آخر شمعة مغلقة
+    if pd.isna(row["atr"]) or pd.isna(row["rsi"]) or pd.isna(row["ema200"]):
         return None
-    long_score, short_score, details = _raw_scores(row, prev)
-    direction = "long" if long_score > short_score else "short" if short_score > long_score else "neutral"
-    strength = max(long_score, short_score)
+
+    strength, direction, details = _kdrx_score(row, df)
+    gates_ok, gate_reasons = _kdrx_hard_gates(row, df)
     entry = float(row["close"])
     atr_val = float(row["atr"])
-    sl_dist = atr_val * config.ATR_SL_MULT
-    support, resistance = find_support_resistance(df)
+    sl_dist = max(atr_val * config.ATR_SL_MULT, entry * config.SL_MIN_PCT)
+    dip_pct, _ = _dip_stats(row, df)
+    support = float(df.iloc[-2 - config.KDRX_DIP_LOOKBACK:-2]["low"].min())
     rsi_val = float(row["rsi"]) if pd.notna(row["rsi"]) else 50.0
-    adx_val = float(row["adx"])
     vol_r = float(row["vol_ratio"]) if pd.notna(row["vol_ratio"]) else 1.0
-    dom = direction if direction != "neutral" else "long"
-    if dom == "long":
-        sl = entry - sl_dist
-        tp1 = entry + sl_dist * config.TP_MULTIPLES[0]
-        tp2 = entry + sl_dist * config.TP_MULTIPLES[1]
-        tp3 = entry + sl_dist * config.TP_MULTIPLES[2]
-    else:
-        sl = entry + sl_dist
-        tp1 = entry - sl_dist * config.TP_MULTIPLES[0]
-        tp2 = entry - sl_dist * config.TP_MULTIPLES[1]
-        tp3 = entry - sl_dist * config.TP_MULTIPLES[2]
-    near_sr = (is_near_support(entry, support) if dom == "long"
-               else is_near_resistance(entry, resistance))
-    if direction != "neutral" and strength >= config.MIN_SCORE and adx_val >= config.MIN_ADX and near_sr:
+
+    # المستويات (شراء فقط — سلم 1R/2R/3R)
+    sl = entry - sl_dist
+    tp1 = entry + sl_dist * config.TP_MULTIPLES[0]
+    tp2 = entry + sl_dist * config.TP_MULTIPLES[1]
+    tp3 = entry + sl_dist * config.TP_MULTIPLES[2]
+
+    # الحكم — منطق Kdrx التجريبي
+    if gates_ok and strength >= config.MIN_SCORE:
         verdict_emoji = "🟢"
-        verdict = f"منطقة {'شراء' if direction == 'long' else 'بيع'}"
+        verdict = "منطقة شراء"
     elif strength >= 45:
         verdict_emoji = "🟡"
         verdict = "إشارات مختلطة — انتظر تأكيداً أوضح"
     else:
         verdict_emoji = "🔴"
         verdict = "لا توجد فرصة واضحة الآن — تجنّب"
+
     risk_lbl, risk_emoji = risk_level(strength)
-    analysis = build_analysis_text(dom, rsi_val, support, resistance, vol_r, entry)
+    analysis = build_analysis_text("long", rsi_val, support, None, vol_r, entry, dip_pct)
+
     return {
-        "symbol": symbol, "price": round(entry, 6), "direction": direction,
-        "strength": strength, "long_score": long_score, "short_score": short_score,
-        "adx": round(adx_val, 1), "rsi": round(rsi_val, 1), "vol_ratio": round(vol_r, 2),
-        "support": round(support, 6) if support else None,
-        "resistance": round(resistance, 6) if resistance else None,
-        "entry": round(entry, 6), "sl": round(sl, 6),
-        "tp1": round(tp1, 6), "tp2": round(tp2, 6), "tp3": round(tp3, 6),
-        "verdict_emoji": verdict_emoji, "verdict": verdict,
-        "risk_level": risk_lbl, "risk_emoji": risk_emoji,
-        "analysis": analysis, "details": details, "at": int(time.time()),
+        "symbol": symbol,
+        "price": round(entry, 6),
+        "direction": direction,
+        "strength": strength,
+        "details": details,
+        "gate_reasons": gate_reasons,
+        "rsi": round(rsi_val, 1),
+        "vol_ratio": round(vol_r, 2),
+        "support": round(support, 6),
+        "resistance": None,
+        "entry": round(entry, 6),
+        "sl": round(sl, 6),
+        "tp1": round(tp1, 6),
+        "tp2": round(tp2, 6),
+        "tp3": round(tp3, 6),
+        "verdict_emoji": verdict_emoji,
+        "verdict": verdict,
+        "risk_level": risk_lbl,
+        "risk_emoji": risk_emoji,
+        "analysis": analysis,
+        "at": int(time.time()),
     }
 
 

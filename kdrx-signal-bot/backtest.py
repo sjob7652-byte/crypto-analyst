@@ -67,15 +67,13 @@ def backtest_symbol(symbol, lookback_days=180):
         # فحص الدخول
         if pd.isna(row["adx"]) or pd.isna(row["atr"]):
             continue
-        strength, direction, details, _ = score_row(row, prev)
+        strength, direction, details, _ = score_row(row, df)
         if direction == "neutral" or strength < config.MIN_SCORE:
-            continue
-        if row["adx"] < config.MIN_ADX:
             continue
 
         entry = float(row["close"])
         atr_v = float(row["atr"])
-        sl_d = atr_v * config.ATR_SL_MULT
+        sl_d = max(atr_v * config.ATR_SL_MULT, entry * config.SL_MIN_PCT)
         if direction == "long":
             sl = entry - sl_d
             tps = [entry + sl_d * m for m in config.TP_MULTIPLES]
