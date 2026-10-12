@@ -124,7 +124,7 @@ KDRX_LIVE_MAX_POSITIONS = 5
 
 # ---------- الكون الديناميكي (أعلى سيولة — طلب أيوب 2026-10-12) ----------
 UNIVERSE_SIZE = 200             # أعلى 200 زوج سبوت USDT سيولة (بدل القائمة الثابتة)
-UNIVERSE_REFRESH_HOURS = 1      # تحديث الكون كل ساعة (طلب أيوب 2026-10-12)
+UNIVERSE_REFRESH_HOURS = 0      # تحديث الكون كل فحص (0 = دائماً طازج — طلب أيوب 2026-10-12)
 UNIVERSE_FILE = os.path.join(STATE_DIR, "universe.json")
 # عملات مستقرة ورموز رافعة تُستبعد دائماً من الكون
 UNIVERSE_EXCLUDE = {
