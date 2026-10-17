@@ -506,8 +506,8 @@ def _kdrx_hard_gates(row, df):
         reasons.append("RSI out of range")
 
     dip_pct, _ = _dip_stats(row, df)
-    if dip_pct is None or dip_pct < config.KDRX_MIN_DIP_PCT:
-        reasons.append("no dip")
+    if dip_pct is None or not (config.KDRX_MIN_DIP_PCT <= dip_pct <= config.KDRX_MAX_DIP_PCT):
+        reasons.append("dip out of 3-8% sweet spot")
 
     return (len(reasons) == 0), reasons
 
@@ -547,6 +547,31 @@ def risk_fraction(strength):
 
 # ================= بناء الإشارة =================
 
+# ================= فلتر زخم السوق (BTC) =================
+
+_btc_cache = {"at": 0, "rsi": 50.0}
+
+def btc_momentum_ok():
+    """فلتر زخم السوق: لا شراء لعملات بديلة إلا إذا BTC نفسه في زخم صاعد.
+
+    يحسب RSI(14) على فريم 4H لـ BTCUSDT — إذا < BTC_MOMENTUM_RSI_MIN تُرفض
+    كل الإشارات (شراء النزلة يفشل عندما BTC نازل — باكتست 2026-10-17).
+    يُحفظ مؤقتاً 5 دقائق لتفادي جلب مكرر.
+    """
+    now = time.time()
+    if now - _btc_cache["at"] < 300:
+        return _btc_cache["rsi"] >= config.BTC_MOMENTUM_RSI_MIN
+    try:
+        df = fetch_klines("BTCUSDT", interval="4h", limit=60)
+        if df is not None and len(df) >= 30:
+            r = float(rsi(df["close"].astype(float)).iloc[-2])
+            _btc_cache.update({"at": now, "rsi": r})
+            return r >= config.BTC_MOMENTUM_RSI_MIN
+    except Exception:
+        pass
+    return True  # عند الفشل: لا نحجب (fail-open)
+
+
 def build_signal(symbol, df, daily_rsi=None):
     """بناء إشارة KDRX من آخر شمعة مغلقة — بالمنهجية المستخرجة من السجل المختوم.
 
@@ -570,6 +595,10 @@ def build_signal(symbol, df, daily_rsi=None):
 
     # خريطة RSI الحرارية (طلب أيوب): لا دخول إذا RSI اليومي < 30 (سكين ساقط)
     if daily_rsi is not None and daily_rsi < config.HEATMAP_DAILY_RSI_MIN:
+        return None
+
+    # فلتر زخم السوق (باكتست 2026-10-17): لا شراء للنزلة إذا BTC نازل
+    if not btc_momentum_ok():
         return None
 
     strength, direction, details, _ = score_row(row, df)
