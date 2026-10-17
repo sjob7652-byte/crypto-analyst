@@ -87,6 +87,17 @@ class Executor:
                 print(f"[EXEC] SL HIT {p['symbol']} pnl={ev['pnl']}", flush=True)
             return ev
 
+        # الوقف الزمني: إلا TP1 ما تضربش في 72 ساعة (18 شمعة 4H) سكر بسعر السوق
+        # (باكتست 2026-10-17: يقطع الصفقات الميتة بخسارة صغيرة بدل انتظار -1R)
+        if not p.get("tp1_hit"):
+            age_h = (time.time() - p.get("opened_at", 0)) / 3600
+            if age_h >= config.KDRX_TIME_STOP_HOURS:
+                ev = self.wallet.partial_close(pid, p["remaining_pct"], price, "TSTOP")
+                if ev:
+                    ev["type"] = "tstop_hit"
+                    print(f"[EXEC] TSTOP {p['symbol']} age={age_h:.1f}h pnl={ev['pnl']}", flush=True)
+                return ev
+
         # الأهداف بالترتيب
         if hit_tp3:
             # إغلاق المتبقي كاملاً
