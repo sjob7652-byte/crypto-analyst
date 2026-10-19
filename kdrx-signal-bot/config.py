@@ -77,8 +77,8 @@ SL_MIN_PCT = 0.025    # حد أدنى صلب للوقف: 2.5% من الدخول 
 MIN_RR = 1.0          # مخاطرة/عائد الهدف الأول ≈ 1:1 (سلم 1R/2R/3R)
 
 # ---------- المحفظة الورقية ----------
-STARTING_CASH = 100.0
-RISK_PER_TRADE = 0.03   # 3% مخاطرة لكل صفقة (مثل Kdrx: 3.09%)
+STARTING_CASH = 50.0   # $50 CHALLENGE
+RISK_PER_TRADE = 0.05   # $50 CHALLENGE: 5% fixed (Kelly-optimal for max growth, backtest +0.142R)
 MAX_POSITIONS = 5
 # توزيع الإغلاق الجزئي (طريقة Kdrx: بيع 50% عند الهدف الأول + نقل الوقف للدخول)
 TP1_CLOSE_PCT = 0.50    # عند الهدف 1: إغلاق 50% + نقل الوقف للدخول (صفقة بلا مخاطرة)
@@ -92,8 +92,8 @@ SUPPORT_PROXIMITY_PCT = 0.03  # السعر قريب من الدعم: ضمن 3%
 # ---------- نسخة Kdrx الكاملة (من البحث المباشر في قناته الرسمية) ----------
 LONG_ONLY = True            # Kdrx: شراء فقط (سبوت — لا بيع)
 ENTRY_ZONE_PCT = 0.015      # منطقة الدخول ±1.5% (مرصود: DASH 68.06 → 67.066–69.054)
-RISK_MIN = 0.0309           # مخاطرة دنيا لكل صفقة (مرصود: 3.09%)
-RISK_MAX = 0.0667           # مخاطرة قصوى (مرصود: 6.67%) — تتدرج مع قوة الإشارة
+RISK_MIN = 0.05              # $50 CHALLENGE: fixed 5% (no escalation, pure Kelly)
+RISK_MAX = 0.05              # $50 CHALLENGE: fixed 5% (no escalation, pure Kelly)
 MIN_BUYER_DOMINANCE = 0.484 # بوابة السيطرة: لا دخول إذا سيطرة البائعين > 51.6% (نظام الحيتان)
 DOMINANCE_LOOKBACK = 20     # شموع لحساب سيطرة المشترين/البائعين
 
@@ -145,3 +145,8 @@ HEATMAP_DAILY_RSI_MIN = 30      # رفض إذا RSI اليومي < 30 (سكين 
 HEATMAP_REFRESH_HOURS = 1       # تحديث الخريطة كل ساعة
 HEATMAP_FILE = os.path.join(STATE_DIR, "heatmap.json")
 HEATMAP_DAILY_LIMIT = 60        # شموع يومية لحساب RSI14
+
+# $50 CHALLENGE (2026-10-20): fresh start, max growth mode
+CHALLENGE_NAME = '$50 Challenge'
+CHALLENGE_START_BALANCE = 50.0
+CHALLENGE_START_DATE = '2026-10-20'
