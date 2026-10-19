@@ -83,7 +83,7 @@
     <div class="flex items-center gap-3">
       <div class="stat-ic" style="background:linear-gradient(135deg,#2563eb,#7c3aed)"><i data-lucide="bot" class="text-white"></i></div>
       <div>
-        <h1 class="text-xl font-extrabold">بوت الإشارات KDRX</h1>
+        <h1 class="text-xl font-extrabold">🚀 تحدي $50 <span class="text-xs text-slate-400">— ضاعفها!</span></h1>
         <div class="flex items-center gap-2 text-xs text-slate-400">
           <span class="pulse-dot"></span><span>مباشر</span>
           <span id="sync-hint" class="text-slate-500">—</span>
@@ -209,7 +209,7 @@
       </div>
     </section>
 
-    <p class="text-xs text-slate-500 text-center">⚠️ المحفظة وهمية 100% للتجربة — نسبة النجاح تقديرية وليست ضماناً للربح</p>
+    <p class="text-xs text-slate-500 text-center">🚀 تحدي $50 — محفظة وهمية 100% — الهدف: مضاعفة الـ $50 بأقصى قوة</p>
   </div>
 </div>
 
@@ -259,6 +259,10 @@ function render() {
   hPnl.innerHTML = pnl >= 0
     ? '<span class="pos">+$' + pnl.toFixed(2) + '</span>'
     : '<span class="neg">-$' + Math.abs(pnl).toFixed(2) + '</span>';
+  // $50 challenge multiplier
+  const startBal = w.start || 50;
+  const mult = equity / startBal;
+  hPnl.innerHTML += ' <span class="text-slate-400">(' + mult.toFixed(2) + 'x)</span>';
   document.getElementById('h-cash').textContent = '$' + (w.cash || 0).toFixed(2);
   document.getElementById('h-open').textContent = positions.length;
   document.getElementById('h-time').textContent = upd.toLocaleTimeString('ar', {hour:'2-digit', minute:'2-digit'});
