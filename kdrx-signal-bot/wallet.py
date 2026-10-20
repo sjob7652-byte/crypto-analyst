@@ -58,12 +58,12 @@ class PaperWallet:
         if sl_dist <= 0:
             return None, "bad_sl"
 
-        # حجم المركز: مخاطرة متدرجة مع قوة الإشارة (3.09% → 6.67% مثل Kdrx)
+        # $50 CHALLENGE: position-size targeting — 20% of equity per trade
+        # (5 positions x 20% = 100% max allocation, ~0.8% risk/trade, diversified)
         equity = self.equity()
-        risk_frac = signal.get("risk_frac", config.RISK_PER_TRADE)
-        risk_amount = equity * risk_frac
-        qty = risk_amount / sl_dist  # الكمية بحيث خسارة الوقف = المخاطرة المحددة
-        notional = qty * entry
+        position_pct = getattr(config, 'POSITION_PCT', 0.20)
+        notional = equity * position_pct
+        qty = notional / entry
 
         # لا نسمح برافعة: القيمة الاسمية ≤ الرصيد المتاح
         if notional > self.data["cash"]:

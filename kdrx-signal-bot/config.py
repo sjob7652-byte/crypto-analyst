@@ -150,3 +150,4 @@ HEATMAP_DAILY_LIMIT = 60        # شموع يومية لحساب RSI14
 CHALLENGE_NAME = '$50 Challenge'
 CHALLENGE_START_BALANCE = 50.0
 CHALLENGE_START_DATE = '2026-10-20'
+POSITION_PCT = 0.20  # $50 CHALLENGE: 20% of equity per position (5 max = 100%)
