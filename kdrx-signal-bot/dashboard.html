@@ -131,34 +131,6 @@
     </section>
 
     <!-- حالة مصادر البيانات -->
-    <!-- KDRX live copy: forwarded signals paper-traded live -->
-    <section class="mb-5" id="kdrx-live-sec" style="display:none">
-      <h2 class="font-extrabold mb-3 flex items-center gap-2"><i data-lucide="copy" class="w-5 h-5 text-violet-400"></i> نسخ KDRX الحي <span class="text-[11px] text-slate-500 font-normal">إشارات مُحوّلة من أيوب — محفظة ورقية $100 منفصلة</span></h2>
-      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-3">
-        <div class="glass p-3"><div class="text-[11px] text-slate-500">الرصيد المتاح</div><div id="kl-eq" class="font-extrabold text-sm" dir="ltr">—</div></div>
-        <div class="glass p-3"><div class="text-[11px] text-slate-500">محجوز في المراكز</div><div id="kl-res" class="font-extrabold text-sm" dir="ltr">—</div></div>
-        <div class="glass p-3"><div class="text-[11px] text-slate-500">العائد</div><div id="kl-ret" class="font-extrabold text-sm" dir="ltr">—</div></div>
-        <div class="glass p-3"><div class="text-[11px] text-slate-500">نسبة الفوز</div><div id="kl-wr" class="font-extrabold text-sm">—</div></div>
-        <div class="glass p-3"><div class="text-[11px] text-slate-500">الصفقات</div><div id="kl-n" class="font-extrabold text-sm">—</div></div>
-        <div class="glass p-3"><div class="text-[11px] text-slate-500">إجمالي P&amp;L</div><div id="kl-pnl" class="font-extrabold text-sm" dir="ltr">—</div></div>
-        <div class="glass p-3"><div class="text-[11px] text-slate-500">مفتوحة الآن</div><div id="kl-open" class="font-extrabold text-sm">—</div></div>
-      </div>
-      <div class="glass p-4 mb-3">
-        <div class="text-[11px] text-slate-500 mb-2">مراكز مفتوحة الآن</div>
-        <div class="overflow-x-auto"><table class="w-full text-xs">
-          <thead><tr class="text-slate-500"><th class="p-2 text-right">الزوج</th><th class="p-2 text-right">الاتجاه</th><th class="p-2 text-right">الدخول</th><th class="p-2 text-right">الوقف</th><th class="p-2 text-right">الأهداف</th><th class="p-2 text-right">القيمة</th></tr></thead>
-          <tbody id="kl-otbody"></tbody>
-        </table></div>
-      </div>
-      <div class="glass p-4">
-        <div class="text-[11px] text-slate-500 mb-2">آخر الصفقات المغلقة</div>
-        <div class="overflow-x-auto"><table class="w-full text-xs">
-          <thead><tr class="text-slate-500"><th class="p-2 text-right">الزوج</th><th class="p-2 text-right">النتيجة</th><th class="p-2 text-right">P&amp;L</th><th class="p-2 text-right">السبب</th></tr></thead>
-          <tbody id="kl-tbody"></tbody>
-        </table></div>
-      </div>
-      <div class="text-[11px] text-slate-500 mt-2 leading-relaxed">تُفتح الصفقة لحظة تحويل الإشارة للبوت — نفس طريقة KDRX: بيع 50% عند الهدف الأول مع تحريك الوقف للتعادل، 30% عند الثاني، الباقي عند الثالث. المراقبة تلقائية كل دقيقتين.</div>
-    </section>
 
 <section class="mb-5">
       <h2 class="font-extrabold mb-3 flex items-center gap-2"><i data-lucide="satellite-dish" class="w-5 h-5 text-sky-400"></i> حالة المصادر <span class="text-[11px] text-slate-500 font-normal">تبديل تلقائي عند السقوط</span></h2>
@@ -279,44 +251,6 @@ function render() {
   document.getElementById('s-losses').textContent = (w.losses || 0);
   document.getElementById('s-sig').textContent = w.signals_sent || total;
 
-  // KDRX live copy (forwarded signals, paper-traded live)
-  (function(){
-    const kl = S.kdrx_live || {};
-    const sec = document.getElementById('kdrx-live-sec');
-    const st = kl.stats;
-    if (!st) return;
-    sec.style.display = '';
-    document.getElementById('kl-eq').textContent = '$' + st.cash.toFixed(2);
-    document.getElementById('kl-res').textContent = '$' + (st.reserved || 0).toFixed(2);
-    const rEl = document.getElementById('kl-ret');
-    rEl.textContent = (st.return_pct >= 0 ? '+' : '') + st.return_pct + '%';
-    rEl.className = 'font-extrabold text-sm ' + (st.return_pct >= 0 ? 'pos' : 'neg');
-    document.getElementById('kl-wr').textContent = st.win_rate + '%';
-    document.getElementById('kl-n').textContent = st.total_trades;
-    const pEl = document.getElementById('kl-pnl');
-    pEl.textContent = (st.total_pnl >= 0 ? '+' : '') + '$' + st.total_pnl.toFixed(2);
-    pEl.className = 'font-extrabold text-sm ' + (st.total_pnl >= 0 ? 'pos' : 'neg');
-    document.getElementById('kl-open').textContent = st.open_count;
-    const poss = Object.values(kl.positions || {});
-    document.getElementById('kl-otbody').innerHTML = poss.length ? poss.map(function(p){
-      const d = p.direction === 'long' ? '🟢 شراء' : '🔴 بيع';
-      return '<tr class="border-t border-slate-800/60"><td class="p-2 font-bold">' + p.symbol.replace('USDT','/USDT') + '</td>' +
-        '<td class="p-2">' + d + '</td>' +
-        '<td class="p-2" dir="ltr">' + p.entry + '</td>' +
-        '<td class="p-2" dir="ltr">' + p.sl + '</td>' +
-        '<td class="p-2" dir="ltr">' + p.tp1 + ' / ' + p.tp2 + ' / ' + p.tp3 + '</td>' +
-        '<td class="p-2" dir="ltr">$' + p.notional.toFixed(2) + '</td></tr>';
-    }).join('') : '<tr><td class="p-2 text-slate-500" colspan="6">لا مراكز مفتوحة — حوّل إشارة KDRX للبوت لفتح أول صفقة</td></tr>';
-    const closed = kl.closed_trades || [];
-    document.getElementById('kl-tbody').innerHTML = closed.length ? closed.map(function(t){
-      const win = t.pnl > 0, rc = win ? 'pos' : 'neg';
-      const pl = (t.pnl >= 0 ? '+' : '') + '$' + t.pnl.toFixed(2) + ' (' + (t.pnl_pct >= 0 ? '+' : '') + t.pnl_pct + '%)';
-      return '<tr class="border-t border-slate-800/60"><td class="p-2 font-bold">' + t.symbol.replace('USDT','/USDT') + '</td>' +
-        '<td class="p-2 ' + rc + '">' + (win ? '✅ رابحة' : '❌ خاسرة') + '</td>' +
-        '<td class="p-2 ' + rc + '" dir="ltr">' + pl + '</td>' +
-        '<td class="p-2 text-slate-500">' + (t.reason || '—') + '</td></tr>';
-    }).join('') : '<tr><td class="p-2 text-slate-500" colspan="4">لا صفقات مغلقة بعد</td></tr>';
-  })();
 
   // market pulse (from system or static)
   const pulse = S.pulse || {};
